@@ -1,0 +1,145 @@
+// A test to demonstrate using wrapper functions for looping in HVM3
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// Pattern type
+data Pattern { #Lit{val} }
+
+// Match a literal
+@match(pattern) = ~ pattern {
+  #Lit{val}: val
+}
+
+// Test pattern
+@pattern = #Lit{1}
+
+// A single step function that avoids variable reuse
+@step(acc) = 
+  ! result = @match(@pattern)
+  (+ acc result)
+
+// Hard-coded looping by composition, using different variable names throughout
+@loop_100(acc) = 
+  ! acc1 = @step(acc)
+  ! acc2 = @step(acc1)
+  ! acc3 = @step(acc2)
+  ! acc4 = @step(acc3)
+  ! acc5 = @step(acc4)
+  ! acc6 = @step(acc5)
+  ! acc7 = @step(acc6)
+  ! acc8 = @step(acc7)
+  ! acc9 = @step(acc8)
+  ! acc10 = @step(acc9)
+  
+  ! acc11 = @step(acc10)
+  ! acc12 = @step(acc11)
+  ! acc13 = @step(acc12)
+  ! acc14 = @step(acc13)
+  ! acc15 = @step(acc14)
+  ! acc16 = @step(acc15)
+  ! acc17 = @step(acc16)
+  ! acc18 = @step(acc17)
+  ! acc19 = @step(acc18)
+  ! acc20 = @step(acc19)
+  
+  ! acc21 = @step(acc20)
+  ! acc22 = @step(acc21)
+  ! acc23 = @step(acc22)
+  ! acc24 = @step(acc23)
+  ! acc25 = @step(acc24)
+  ! acc26 = @step(acc25)
+  ! acc27 = @step(acc26)
+  ! acc28 = @step(acc27)
+  ! acc29 = @step(acc28)
+  ! acc30 = @step(acc29)
+  
+  ! acc31 = @step(acc30)
+  ! acc32 = @step(acc31)
+  ! acc33 = @step(acc32)
+  ! acc34 = @step(acc33)
+  ! acc35 = @step(acc34)
+  ! acc36 = @step(acc35)
+  ! acc37 = @step(acc36)
+  ! acc38 = @step(acc37)
+  ! acc39 = @step(acc38)
+  ! acc40 = @step(acc39)
+  
+  ! acc41 = @step(acc40)
+  ! acc42 = @step(acc41)
+  ! acc43 = @step(acc42)
+  ! acc44 = @step(acc43)
+  ! acc45 = @step(acc44)
+  ! acc46 = @step(acc45)
+  ! acc47 = @step(acc46)
+  ! acc48 = @step(acc47)
+  ! acc49 = @step(acc48)
+  ! acc50 = @step(acc49)
+  
+  ! acc51 = @step(acc50)
+  ! acc52 = @step(acc51)
+  ! acc53 = @step(acc52)
+  ! acc54 = @step(acc53)
+  ! acc55 = @step(acc54)
+  ! acc56 = @step(acc55)
+  ! acc57 = @step(acc56)
+  ! acc58 = @step(acc57)
+  ! acc59 = @step(acc58)
+  ! acc60 = @step(acc59)
+  
+  ! acc61 = @step(acc60)
+  ! acc62 = @step(acc61)
+  ! acc63 = @step(acc62)
+  ! acc64 = @step(acc63)
+  ! acc65 = @step(acc64)
+  ! acc66 = @step(acc65)
+  ! acc67 = @step(acc66)
+  ! acc68 = @step(acc67)
+  ! acc69 = @step(acc68)
+  ! acc70 = @step(acc69)
+  
+  ! acc71 = @step(acc70)
+  ! acc72 = @step(acc71)
+  ! acc73 = @step(acc72)
+  ! acc74 = @step(acc73)
+  ! acc75 = @step(acc74)
+  ! acc76 = @step(acc75)
+  ! acc77 = @step(acc76)
+  ! acc78 = @step(acc77)
+  ! acc79 = @step(acc78)
+  ! acc80 = @step(acc79)
+  
+  ! acc81 = @step(acc80)
+  ! acc82 = @step(acc81)
+  ! acc83 = @step(acc82)
+  ! acc84 = @step(acc83)
+  ! acc85 = @step(acc84)
+  ! acc86 = @step(acc85)
+  ! acc87 = @step(acc86)
+  ! acc88 = @step(acc87)
+  ! acc89 = @step(acc88)
+  ! acc90 = @step(acc89)
+  
+  ! acc91 = @step(acc90)
+  ! acc92 = @step(acc91)
+  ! acc93 = @step(acc92)
+  ! acc94 = @step(acc93)
+  ! acc95 = @step(acc94)
+  ! acc96 = @step(acc95)
+  ! acc97 = @step(acc96)
+  ! acc98 = @step(acc97)
+  ! acc99 = @step(acc98)
+  ! acc100 = @step(acc99)
+  
+  acc100  // Return the final accumulator
+
+// Main function
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}:
+    // Run the loop starting with accumulator 0
+    @loop_100(0)
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}
