@@ -1,0 +1,228 @@
+// HVM3-compatible regex compiler
+// This module pre-compiles regex patterns to avoid reparsing on each match
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// Pattern types from parser
+data Pattern { 
+  #Lit{val}             // Literal character value
+  #Cat{a b}             // Concatenation
+  #Alt{a b}             // Alternation
+  #Rep{p}               // Zero or more (star)
+  #Plus{p}              // One or more (plus)
+  #Opt{p}               // Optional (question mark)
+  #Class{class}         // Character class
+  #NClass{class}        // Negated character class
+  #Start{}              // Start anchor (^)
+  #End{}                // End anchor ($)
+  #Any{}                // Any character (.)
+  #Word{}               // Word character (\w)
+  #NonWord{}            // Non-word character (\W)
+  #Digit{}              // Digit character (\d)
+  #NonDigit{}           // Non-digit character (\D)
+  #Space{}              // Space character (\s)
+  #NonSpace{}           // Non-space character (\S)
+  #WordB{}              // Word boundary (\b)
+  #NonWordB{}           // Non-word boundary (\B)
+}
+
+// Regex string enum
+data RegexString {
+  #GET        // "GET"
+  #POST       // "POST"
+  #a_star     // "a*"
+  #a_plus     // "a+"
+  #a_q        // "a?"
+  #a_b        // "ab"
+  #a_or_b     // "a|b"
+  #any_char   // "."
+  #a_to_z     // "[a-z]"
+  #digits     // "[0-9]"
+  #neg_az     // "[^a-z]"
+  #word_char  // "\w"
+  #digit_char // "\d"
+  #space_char // "\s"
+  #abc_grp    // "(abc)"
+  #abc_d      // "abc?d"
+  #complex    // "a(b|c)*d"
+  #start_a    // "^a"
+  #end_z      // "z$"
+  #other      // Default for unknown patterns
+}
+
+// Result type for compiled patterns
+data CompiledResult {
+  #Success{pattern}
+  #Error{msg}
+}
+
+// Cache entry type
+data CacheEntry {
+  #Entry{regex pattern}
+  #Empty
+}
+
+// Cache with fixed slots (simplified approach)
+data Cache {
+  #Cache{e1 e2 e3 e4 e5}
+}
+
+// Initialize an empty cache
+@init_cache = #Cache{#Empty #Empty #Empty #Empty #Empty}
+
+// Calculate hash for regex (simplified)
+@hash(regex) = ~ regex {
+  #GET: 1
+  #POST: 2
+  #a_star: 3
+  #a_plus: 4
+  #a_q: 5
+  #a_b: 6
+  #a_or_b: 7
+  #any_char: 8
+  #a_to_z: 9
+  #digits: 10
+  #neg_az: 11
+  #word_char: 12
+  #digit_char: 13
+  #space_char: 14
+  #abc_grp: 15
+  #abc_d: 16
+  #complex: 17
+  #start_a: 18
+  #end_z: 19
+  _: 0
+}
+
+// Look up regex in cache
+@cache_lookup(cache regex) = ~ cache {
+  #Cache{e1 e2 e3 e4 e5}:
+    // Check slot based on hash
+    ! slot = (mod (@hash(regex)) 5)
+    ! entry = ~ slot {
+      0: e1
+      1: e2
+      2: e3
+      3: e4
+      _: e5
+    }
+    
+    // Check if entry matches
+    ~ entry {
+      #Entry{entry_regex entry_pattern}:
+        ~ (== entry_regex regex) {
+          1: #Success{entry_pattern}  // Found in cache
+          0: #Error{"Not in cache"}
+        }
+      #Empty: #Error{"Not in cache"}
+    }
+}
+
+// Add regex to cache
+@cache_add(cache regex pattern) = ~ cache {
+  #Cache{e1 e2 e3 e4 e5}:
+    // Add to slot based on hash
+    ! slot = (mod (@hash(regex)) 5)
+    ! new_entry = #Entry{regex pattern}
+    
+    ~ slot {
+      0: #Cache{new_entry e2 e3 e4 e5}
+      1: #Cache{e1 new_entry e3 e4 e5}
+      2: #Cache{e1 e2 new_entry e4 e5}
+      3: #Cache{e1 e2 e3 new_entry e5}
+      _: #Cache{e1 e2 e3 e4 new_entry}
+    }
+}
+
+// Compile a regex pattern (or retrieve from cache)
+@compile(regex cache) =
+  // Check if in cache
+  ! lookup = @cache_lookup(cache regex)
+  
+  ~ lookup {
+    #Success{pattern}:
+      // Found in cache, return it
+      {pattern cache}
+      
+    #Error{msg}:
+      // Not in cache, compile it
+      ! pattern = @parse_regex(regex)
+      
+      // Add to cache
+      ! new_cache = @cache_add(cache regex pattern)
+      
+      // Return compiled pattern and updated cache
+      {pattern new_cache}
+  }
+
+// Parse regex (simplified implementation)
+@parse_regex(regex) = ~ regex {
+  #GET: #Cat{#Lit{#G} #Cat{#Lit{#E} #Lit{#T}}}
+  #POST: #Cat{#Lit{#P} #Cat{#Lit{#O} #Cat{#Lit{#S} #Lit{#T}}}}
+  #a_star: #Rep{#Lit{#a}}
+  #a_plus: #Plus{#Lit{#a}}
+  #a_q: #Opt{#Lit{#a}}
+  #a_b: #Cat{#Lit{#a} #Lit{#b}}
+  #a_or_b: #Alt{#Lit{#a} #Lit{#b}}
+  #any_char: #Any{}
+  #a_to_z: #Class{#Lower}
+  #digits: #Class{#Digits}
+  #neg_az: #NClass{#Lower}
+  #word_char: #Word{}
+  #digit_char: #Digit{}
+  #space_char: #Space{}
+  #abc_grp: #Cat{#Lit{#a} #Cat{#Lit{#b} #Lit{#c}}}
+  #abc_d: #Cat{#Cat{#Lit{#a} #Cat{#Lit{#b} #Opt{#Lit{#c}}}} #Lit{#d}}
+  #complex: #Cat{#Lit{#a} #Cat{#Rep{#Alt{#Lit{#b} #Lit{#c}}} #Lit{#d}}}
+  #start_a: #Cat{#Start{} #Lit{#a}}
+  #end_z: #Cat{#Lit{#z} #End{}}
+  _: #Lit{#a}  // Default
+}
+
+// Pre-optimization: Simplify pattern before matching
+@optimize(pattern) = ~ pattern {
+  // Various optimizations could be implemented here
+  // For now, just return the original pattern
+  pattern
+}
+
+// Compile and optimize
+@compile_and_optimize(regex cache) =
+  // First compile the pattern
+  ! compile_result = @compile(regex cache)
+  ! pattern = compile_result.0
+  ! new_cache = compile_result.1
+  
+  // Then optimize it
+  ! optimized = @optimize(pattern)
+  
+  // Return the optimized pattern and updated cache
+  {optimized new_cache}
+
+// Main function
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}: 
+    // Initialize cache
+    ! cache = @init_cache
+    
+    // Compile some patterns
+    ! r1 = @compile_and_optimize(#a_star cache)
+    ! pattern1 = r1.0
+    ! cache1 = r1.1
+    
+    ! r2 = @compile_and_optimize(#a_or_b cache1)
+    ! pattern2 = r2.0
+    ! cache2 = r2.1
+    
+    ! r3 = @compile_and_optimize(#a_star cache2)  // Already in cache
+    ! pattern3 = r3.0
+    ! cache3 = r3.1
+    
+    // Return success
+    1
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}

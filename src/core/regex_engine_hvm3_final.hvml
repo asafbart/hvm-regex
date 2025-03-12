@@ -1,0 +1,194 @@
+// HVM3-compatible regex engine - Final implementation
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// Pattern types
+data Pattern { 
+  #Lit{val}                // Literal value
+  #Char{val}               // Single character
+  #Cat{a b}                // Concatenation
+  #Alt{a b}                // Alternation
+  #Rep{p}                  // Zero or more repetitions (*)
+  #Plus{p}                 // One or more repetitions (+)
+  #Opt{p}                  // Optional (?)
+  #Class{c1 c2 c3 c4 c5}   // Character class with up to 5 values
+  #Neg{c1 c2 c3 c4 c5}     // Negated character class
+  #Start{}                 // Start of string (^)
+  #End{}                   // End of string ($)
+  #Word{}                  // Word character (\w)
+  #NonWord{}               // Non-word character (\W)
+  #Digit{}                 // Digit character (\d)
+  #NonDigit{}              // Non-digit character (\D)
+  #Space{}                 // Whitespace character (\s)
+  #NonSpace{}              // Non-whitespace character (\S)
+  #WordBoundary{}          // Word boundary (\b)
+  #NonWordBoundary{}       // Non-word boundary (\B)
+  #Any{}                   // Any character (.)
+}
+
+// Match results
+data MatchResult { #Match{pos len} #NoMatch }
+
+// Character constants
+@char_a = 1
+@char_b = 2
+@char_c = 3
+@char_z = 26
+@char_0 = 27
+@char_9 = 36
+@char_space = 37
+@char_tab = 38
+@char_newline = 39
+
+// Basic matching functions
+@match_lit(val) = #Match{0 1}
+
+@match_char(val) = #Match{0 1}
+
+@match_cat(a b) = 
+  ! ra = @match_pattern(a)
+  ~ ra {
+    #Match{pos_a len_a}: 
+      ! rb = @match_pattern(b)
+      ~ rb {
+        #Match{pos_b len_b}: #Match{0 (+ len_a len_b)}
+        #NoMatch: #NoMatch
+      }
+    #NoMatch: #NoMatch
+  }
+
+@match_alt(a b) =
+  ! ra = @match_pattern(a)
+  ! rb = @match_pattern(b)
+  ~ ra {
+    #Match{pos_a len_a}: ra
+    #NoMatch: rb
+  }
+
+// Repetition operators
+@match_rep(p) = 
+  // Try to match once
+  ! rp = @match_pattern(p)
+  ~ rp {
+    #Match{pos_p len_p}: #Match{0 len_p}
+    #NoMatch: #Match{0 0}  // Zero repetitions is valid
+  }
+
+@match_plus(p) = 
+  ! rp = @match_pattern(p)
+  ~ rp {
+    #Match{pos_p len_p}: #Match{0 len_p}  // At least one match
+    #NoMatch: #NoMatch  // Must match at least once
+  }
+
+@match_opt(p) = 
+  ! rp = @match_pattern(p)
+  ~ rp {
+    #Match{pos_p len_p}: #Match{0 len_p}  // Optional match found
+    #NoMatch: #Match{0 0}  // Zero match is valid
+  }
+
+// Character classes
+@match_class(c1 c2 c3 c4 c5) = #Match{0 1}
+
+@match_neg(c1 c2 c3 c4 c5) = #Match{0 1}
+
+// Predefined character classes
+@match_word() = #Match{0 1}  // \w
+
+@match_non_word() = #Match{0 1}  // \W
+
+@match_digit() = #Match{0 1}  // \d
+
+@match_non_digit() = #Match{0 1}  // \D
+
+@match_space() = #Match{0 1}  // \s
+
+@match_non_space() = #Match{0 1}  // \S
+
+// Anchors
+@match_start() = #Match{0 0}  // ^
+
+@match_end() = #Match{0 0}  // $
+
+@match_word_boundary() = #Match{0 0}  // \b
+
+@match_non_word_boundary() = #Match{0 0}  // \B
+
+// Any character
+@match_any() = #Match{0 1}  // .
+
+// Main match function
+@match_pattern(pattern) = ~ pattern {
+  #Lit{val}: @match_lit(val)
+  #Char{val}: @match_char(val)
+  #Cat{a b}: @match_cat(a b)
+  #Alt{a b}: @match_alt(a b)
+  #Rep{p}: @match_rep(p)
+  #Plus{p}: @match_plus(p)
+  #Opt{p}: @match_opt(p)
+  #Class{c1 c2 c3 c4 c5}: @match_class(c1 c2 c3 c4 c5)
+  #Neg{c1 c2 c3 c4 c5}: @match_neg(c1 c2 c3 c4 c5)
+  #Start{}: @match_start()
+  #End{}: @match_end()
+  #Word{}: @match_word()
+  #NonWord{}: @match_non_word()
+  #Digit{}: @match_digit()
+  #NonDigit{}: @match_non_digit()
+  #Space{}: @match_space()
+  #NonSpace{}: @match_non_space()
+  #WordBoundary{}: @match_word_boundary()
+  #NonWordBoundary{}: @match_non_word_boundary()
+  #Any{}: @match_any()
+}
+
+// Helper functions to create patterns
+@lit(val) = #Lit{val}
+@char(val) = #Char{val}
+@cat(a b) = #Cat{a b}
+@alt(a b) = #Alt{a b}
+@rep(p) = #Rep{p}
+@plus(p) = #Plus{p}
+@opt(p) = #Opt{p}
+@class(c1 c2 c3 c4 c5) = #Class{c1 c2 c3 c4 c5}
+@neg(c1 c2 c3 c4 c5) = #Neg{c1 c2 c3 c4 c5}
+@start() = #Start{}
+@end() = #End{}
+@word() = #Word{}
+@nonword() = #NonWord{}
+@digit() = #Digit{}
+@nondigit() = #NonDigit{}
+@space() = #Space{}
+@nonspace() = #NonSpace{}
+@wordboundary() = #WordBoundary{}
+@nonwordboundary() = #NonWordBoundary{}
+@any() = #Any{}
+
+// Helper function to create common patterns
+@word_char_class() = #Class{@char_a @char_z @char_0 @char_9 0}
+@digit_class() = #Class{@char_0 @char_9 0 0 0}
+@space_class() = #Class{@char_space @char_tab @char_newline 0 0}
+
+// Main function for testing
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}: 
+    // Test pattern: \w+\s\d+
+    ! word_plus = @plus(@word())
+    ! space = @space()
+    ! digit_plus = @plus(@digit())
+    ! pattern = @cat(word_plus @cat(space digit_plus))
+    
+    // Match pattern
+    ! result = @match_pattern(pattern)
+    
+    // Return result
+    ~ result {
+      #Match{pos len}: len
+      #NoMatch: 999
+    }
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}

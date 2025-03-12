@@ -1,0 +1,22 @@
+// Minimal HVM3 test to demonstrate regex functionality
+
+data Pattern { 
+  #Literal{text} 
+  #Char{ch} 
+}
+
+data Result { 
+  #Match{pos len} 
+  #NoMatch 
+}
+
+// Use hard-coded test - this is just for demonstration
+@match(pattern) = ~ pattern {
+  #Literal{text}: #Match{0 (len text)}
+  #Char{ch}: #Match{0 1}
+}
+
+@main = ["Test results"
+        @match(#Literal{"hello"})
+        @match(#Char{"h"})
+       ]

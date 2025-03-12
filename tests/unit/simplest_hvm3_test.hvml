@@ -1,0 +1,2 @@
+// Simplest possible HVM3 test
+@main = (+ 1 2)

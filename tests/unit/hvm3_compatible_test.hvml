@@ -1,0 +1,87 @@
+// HVM3 compatible regex test
+
+// Match result and pattern structures
+data MatchResult { #Match{pos len} #NoMatch }
+data Pattern { #Literal{text} #Char{ch} }
+
+// Match a literal string
+@match_literal(lit str pos) =
+  let str_len = len(str)
+  let lit_len = len(lit)
+  
+  ~(>= (- str_len pos) lit_len) {
+    true: 
+      let substr_to_check = substr(str pos lit_len)
+      ~(== substr_to_check lit) {
+        true: #Match{pos lit_len}
+        false: #NoMatch
+      }
+    false: #NoMatch
+  }
+
+// Main matcher function
+@match(pattern str pos) = ~pattern {
+  #Literal{text}: @match_literal(text str pos)
+  #Char{ch}: 
+    ~(< pos len(str)) {
+      true:
+        let c = substr(str pos 1)
+        ~(== ch c) {
+          true: #Match{pos 1}
+          false: #NoMatch
+        }
+      false: #NoMatch
+    }
+}
+
+// Simple concatenation test
+@match_concat(first second str pos) =
+  // Try to match the first pattern
+  let first_result = @match(first str pos)
+  
+  ~first_result {
+    #Match{p1 l1}:
+      // First pattern matched, now try the second pattern
+      let new_pos = (+ pos l1)
+      let second_result = @match(second str new_pos)
+      
+      ~second_result {
+        #Match{p2 l2}:
+          // Both patterns matched, combine the results
+          #Match{pos (+ l1 l2)}
+        #NoMatch: #NoMatch
+      }
+    #NoMatch: #NoMatch
+  }
+
+// Tests
+@main =
+  // Test with a literal pattern "hello"
+  let test1 = @match(#Literal{text: "hello"} "hello world" 0)
+  
+  // Test with a character pattern 'a'
+  let test2 = @match(#Char{ch: "a"} "abc" 0)
+  
+  // Test concatenation of two patterns
+  let test3 = @match_concat(
+    #Literal{text: "hello"},
+    #Literal{text: " world"},
+    "hello world",
+    0
+  )
+  
+  // Display results
+  {
+    test1: ~test1 {
+      #Match{p l}: ["Literal match at:", p, "length:", l]
+      #NoMatch: "No literal match"
+    },
+    test2: ~test2 {
+      #Match{p l}: ["Char match at:", p, "length:", l]
+      #NoMatch: "No char match"
+    },
+    test3: ~test3 {
+      #Match{p l}: ["Concat match at:", p, "length:", l]
+      #NoMatch: "No concat match"
+    }
+  }

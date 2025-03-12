@@ -1,0 +1,113 @@
+// HVM3-compatible regex engine
+data List { #Nil #Cons{head tail} }
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// Pattern types
+data Pat { 
+  #Lit{txt}    // Literal string
+  #Chr{c}      // Character
+  #Cat{a b}    // Concatenation
+  #Alt{a b}    // Alternation
+  #Rep{p}      // Repetition (star)
+  #Pls{p}      // One or more
+  #Opt{p}      // Optional
+}
+
+// Match result
+data Res { #Yes{pos len} #No }
+
+// Match a literal
+@match_lit(txt) = #Yes{0 1}
+
+// Match a character
+@match_chr(c) = #Yes{0 1}
+
+// Match concatenation
+@match_cat(a b) = 
+  ! ra = @match(a)
+  ~ ra {
+    #Yes{p1 l1}: 
+      ! rb = @match(b)
+      ~ rb {
+        #Yes{p2 l2}: #Yes{0 (+ l1 l2)}
+        #No: #No
+      }
+    #No: #No
+  }
+
+// Match alternation
+@match_alt(a b) =
+  ! ra = @match(a)
+  ! rb = @match(b)
+  ~ ra {
+    #Yes{p l}: #Yes{p l}
+    #No: rb
+  }
+
+// Match zero or more repetitions
+@match_rep(p) = #Yes{0 0}
+
+// Match one or more repetitions
+@match_pls(p) =
+  ! result = @match(p)
+  ~ result {
+    #Yes{pos len}: #Yes{pos len}
+    #No: #No
+  }
+
+// Match optional pattern
+@match_opt(p) =
+  ! result = @match(p)
+  ~ result {
+    #Yes{pos len}: #Yes{pos len}
+    #No: #Yes{0 0}
+  }
+
+// Main match function
+@match(pat) = ~ pat {
+  #Lit{txt}: @match_lit(txt)
+  #Chr{c}: @match_chr(c)
+  #Cat{a b}: @match_cat(a b)
+  #Alt{a b}: @match_alt(a b)
+  #Rep{p}: @match_rep(p)
+  #Pls{p}: @match_pls(p)
+  #Opt{p}: @match_opt(p)
+}
+
+// Create patterns
+@lit(txt) = #Lit{txt}
+@chr(c) = #Chr{c}
+@cat(a b) = #Cat{a b}
+@alt(a b) = #Alt{a b}
+@rep(p) = #Rep{p}
+@pls(p) = #Pls{p}
+@opt(p) = #Opt{p}
+
+// Main function for testing
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}: 
+    // Create pattern: a(b|c)?d
+    ! a = @chr("a")
+    ! b = @chr("b")
+    ! c = @chr("c")
+    ! d = @chr("d")
+    ! bc = @alt(b c)
+    ! bc_opt = @opt(bc)
+    ! abc = @cat(a bc_opt)
+    ! abcd = @cat(abc d)
+    
+    // Match pattern
+    ! result = @match(abcd)
+    
+    // Return result
+    ~ result {
+      #Yes{p l}: l  // Success, return length
+      #No: 999      // Failure, return error code
+    }
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}

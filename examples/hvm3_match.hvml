@@ -1,0 +1,130 @@
+// HVM3 regex example usage
+// This file demonstrates how to use the HVM3-compatible regex engine
+
+// Import pattern types
+data Pattern { 
+  #Literal{text}        // Literal string match
+  #Char{char}           // Single character match
+  #Concat{a b}          // Concatenation (a then b)
+  #Choice{a b}          // Alternation (a or b)
+  #Star{p}              // Zero or more repetitions (a*)
+  #Plus{p}              // One or more repetitions (a+)
+  #Optional{p}          // Zero or one repetition (a?)
+}
+
+// Result type for matches
+data Result { 
+  #Match{pos len}       // Successful match with position and length
+  #NoMatch              // Failed match
+}
+
+// Example 1: Simple regex pattern "hello"
+@example1 =
+  // Create a literal pattern
+  ! pattern = #Literal{"hello"}
+  
+  // Test input
+  ! input = "hello world"
+  
+  // Match the pattern against the input
+  ! result = @match(pattern input 0)
+  
+  // Display the result
+  ["Example 1:" result]
+
+// Example 2: Character class-style pattern "[ab]"
+@example2 =
+  // Create a choice pattern representing a character class
+  ! a = #Char{"a"}
+  ! b = #Char{"b"}
+  ! pattern = #Choice{a b}  // equivalent to [ab]
+  
+  // Test inputs
+  ! input1 = "apple"
+  ! input2 = "banana"
+  ! input3 = "cherry"
+  
+  // Match the pattern against the inputs
+  ! result1 = @match(pattern input1 0)
+  ! result2 = @match(pattern input2 0)
+  ! result3 = @match(pattern input3 0)
+  
+  // Display the results
+  ["Example 2:" 
+    ["input1 (apple):" result1]
+    ["input2 (banana):" result2]
+    ["input3 (cherry):" result3]
+  ]
+
+// Example 3: Complex pattern "a(b|c)*d"
+@example3 =
+  // Create a complex pattern: a(b|c)*d
+  ! a = #Char{"a"}
+  ! b = #Char{"b"}
+  ! c = #Char{"c"}
+  ! d = #Char{"d"}
+  ! bc = #Choice{b c}
+  ! bc_star = #Star{bc}
+  ! abc = #Concat{a bc_star}
+  ! pattern = #Concat{abc d}
+  
+  // Test inputs
+  ! input1 = "ad"        // Simplest match
+  ! input2 = "abd"       // One b
+  ! input3 = "acd"       // One c
+  ! input4 = "abcbcd"    // Multiple b and c
+  ! input5 = "abcdef"    // No match (missing d at end)
+  
+  // Match the pattern against the inputs
+  ! result1 = @match(pattern input1 0)
+  ! result2 = @match(pattern input2 0)
+  ! result3 = @match(pattern input3 0)
+  ! result4 = @match(pattern input4 0)
+  ! result5 = @match(pattern input5 0)
+  
+  // Display the results
+  ["Example 3:" 
+    ["input1 (ad):" result1]
+    ["input2 (abd):" result2]
+    ["input3 (acd):" result3]
+    ["input4 (abcbcd):" result4]
+    ["input5 (abcdef):" result5]
+  ]
+
+// Example 4: Using + and ? operators
+@example4 =
+  // Create pattern: a+b?
+  ! a = #Char{"a"}
+  ! b = #Char{"b"}
+  ! a_plus = #Plus{a}
+  ! b_opt = #Optional{b}
+  ! pattern = #Concat{a_plus b_opt}
+  
+  // Test inputs
+  ! input1 = "a"      // One a, no b
+  ! input2 = "aab"    // Multiple a, with b
+  ! input3 = "b"      // No a, just b (should not match)
+  ! input4 = "c"      // No match
+  
+  // Match the pattern against the inputs
+  ! result1 = @match(pattern input1 0)
+  ! result2 = @match(pattern input2 0)
+  ! result3 = @match(pattern input3 0)
+  ! result4 = @match(pattern input4 0)
+  
+  // Display the results
+  ["Example 4:" 
+    ["input1 (a):" result1]
+    ["input2 (aab):" result2]
+    ["input3 (b):" result3]
+    ["input4 (c):" result4]
+  ]
+
+// Main function to run examples
+@main =
+  [
+    @example1,
+    @example2,
+    @example3,
+    @example4
+  ]

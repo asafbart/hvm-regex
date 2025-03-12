@@ -1,0 +1,292 @@
+// HVM3 regex engine tests
+// This file contains tests for the HVM3-compatible regex engine
+
+// Import pattern data types from regex_engine_hvm3.hvml
+data Pattern { 
+  #Literal{text}        // Literal string match
+  #Char{char}           // Single character match
+  #Concat{a b}          // Concatenation (a then b)
+  #Choice{a b}          // Alternation (a or b)
+  #Star{p}              // Zero or more repetitions (a*)
+  #Plus{p}              // One or more repetitions (a+)
+  #Optional{p}          // Zero or one repetition (a?)
+}
+
+// Result type for match results
+data Result { 
+  #Match{pos len}       // Successful match with position and length
+  #NoMatch              // Failed match
+}
+
+// Test result type
+data TestResult {
+  #Pass                 // Test passed
+  #Fail{expected actual} // Test failed with expected and actual values
+}
+
+// Run a single test case
+@run_test(name test_fn) =
+  ! result = test_fn()
+  ~result {
+    #Pass: [name "PASS"]
+    #Fail{expected actual}: [name "FAIL" expected actual]
+  }
+
+// Test literal pattern matching
+@test_literal =
+  // Create a literal pattern
+  ! pattern = #Literal{"hello"}
+  
+  // Test with matching input
+  ! input1 = "hello world"
+  ! result1 = @match(pattern input1 0)
+  ! expected1 = #Match{0 5}
+  
+  // Test with non-matching input
+  ! input2 = "goodbye"
+  ! result2 = @match(pattern input2 0)
+  ! expected2 = #NoMatch
+  
+  // Check results
+  ~(== result1 expected1) {
+    0: #Fail{expected1 result1}
+    _: 
+      ~(== result2 expected2) {
+        0: #Fail{expected2 result2}
+        _: #Pass
+      }
+  }
+
+// Test character pattern matching
+@test_char =
+  // Create a character pattern
+  ! pattern = #Char{"a"}
+  
+  // Test with matching input
+  ! input1 = "abc"
+  ! result1 = @match(pattern input1 0)
+  ! expected1 = #Match{0 1}
+  
+  // Test with non-matching input
+  ! input2 = "def"
+  ! result2 = @match(pattern input2 0)
+  ! expected2 = #NoMatch
+  
+  // Check results
+  ~(== result1 expected1) {
+    0: #Fail{expected1 result1}
+    _: 
+      ~(== result2 expected2) {
+        0: #Fail{expected2 result2}
+        _: #Pass
+      }
+  }
+
+// Test concatenation pattern matching
+@test_concat =
+  // Create a concatenation pattern: "ab"
+  ! a = #Char{"a"}
+  ! b = #Char{"b"}
+  ! pattern = #Concat{a b}
+  
+  // Test with matching input
+  ! input1 = "abc"
+  ! result1 = @match(pattern input1 0)
+  ! expected1 = #Match{0 2}
+  
+  // Test with non-matching input
+  ! input2 = "def"
+  ! result2 = @match(pattern input2 0)
+  ! expected2 = #NoMatch
+  
+  // Check results
+  ~(== result1 expected1) {
+    0: #Fail{expected1 result1}
+    _: 
+      ~(== result2 expected2) {
+        0: #Fail{expected2 result2}
+        _: #Pass
+      }
+  }
+
+// Test alternation pattern matching
+@test_choice =
+  // Create an alternation pattern: "a|b"
+  ! a = #Char{"a"}
+  ! b = #Char{"b"}
+  ! pattern = #Choice{a b}
+  
+  // Test with first alternative
+  ! input1 = "abc"
+  ! result1 = @match(pattern input1 0)
+  ! expected1 = #Match{0 1}
+  
+  // Test with second alternative
+  ! input2 = "bcd"
+  ! result2 = @match(pattern input2 0)
+  ! expected2 = #Match{0 1}
+  
+  // Test with non-matching input
+  ! input3 = "def"
+  ! result3 = @match(pattern input3 0)
+  ! expected3 = #NoMatch
+  
+  // Check results
+  ~(== result1 expected1) {
+    0: #Fail{expected1 result1}
+    _: 
+      ~(== result2 expected2) {
+        0: #Fail{expected2 result2}
+        _: 
+          ~(== result3 expected3) {
+            0: #Fail{expected3 result3}
+            _: #Pass
+          }
+      }
+  }
+
+// Test star pattern matching
+@test_star =
+  // Create a star pattern: "a*"
+  ! a = #Char{"a"}
+  ! pattern = #Star{a}
+  
+  // Test with zero occurrences
+  ! input1 = "bcd"
+  ! result1 = @match(pattern input1 0)
+  ! expected1 = #Match{0 0}
+  
+  // Test with multiple occurrences
+  ! input2 = "aaabc"
+  ! result2 = @match(pattern input2 0)
+  ! expected2 = #Match{0 3}  // Matches "aaa"
+  
+  // Check results
+  ~(== result1 expected1) {
+    0: #Fail{expected1 result1}
+    _: 
+      ~(== result2 expected2) {
+        0: #Fail{expected2 result2}
+        _: #Pass
+      }
+  }
+
+// Test plus pattern matching
+@test_plus =
+  // Create a plus pattern: "a+"
+  ! a = #Char{"a"}
+  ! pattern = #Plus{a}
+  
+  // Test with one occurrence
+  ! input1 = "abc"
+  ! result1 = @match(pattern input1 0)
+  ! expected1 = #Match{0 1}
+  
+  // Test with multiple occurrences
+  ! input2 = "aaabc"
+  ! result2 = @match(pattern input2 0)
+  ! expected2 = #Match{0 3}  // Matches "aaa"
+  
+  // Test with zero occurrences (should not match)
+  ! input3 = "bcd"
+  ! result3 = @match(pattern input3 0)
+  ! expected3 = #NoMatch
+  
+  // Check results
+  ~(== result1 expected1) {
+    0: #Fail{expected1 result1}
+    _: 
+      ~(== result2 expected2) {
+        0: #Fail{expected2 result2}
+        _: 
+          ~(== result3 expected3) {
+            0: #Fail{expected3 result3}
+            _: #Pass
+          }
+      }
+  }
+
+// Test optional pattern matching
+@test_optional =
+  // Create an optional pattern: "a?"
+  ! a = #Char{"a"}
+  ! pattern = #Optional{a}
+  
+  // Test with one occurrence
+  ! input1 = "abc"
+  ! result1 = @match(pattern input1 0)
+  ! expected1 = #Match{0 1}
+  
+  // Test with zero occurrences
+  ! input2 = "bcd"
+  ! result2 = @match(pattern input2 0)
+  ! expected2 = #Match{0 0}  // Zero-width match
+  
+  // Check results
+  ~(== result1 expected1) {
+    0: #Fail{expected1 result1}
+    _: 
+      ~(== result2 expected2) {
+        0: #Fail{expected2 result2}
+        _: #Pass
+      }
+  }
+
+// Test complex pattern matching
+@test_complex =
+  // Create a complex pattern: a(b|c)*d
+  ! a = #Char{"a"}
+  ! b = #Char{"b"}
+  ! c = #Char{"c"}
+  ! d = #Char{"d"}
+  ! bc = #Choice{b c}
+  ! bc_star = #Star{bc}
+  ! ab_star = #Concat{a bc_star}
+  ! pattern = #Concat{ab_star d}
+  
+  // Test with simple match
+  ! input1 = "ad"
+  ! result1 = @match(pattern input1 0)
+  ! expected1 = #Match{0 2}
+  
+  // Test with complex match
+  ! input2 = "abcbcd"
+  ! result2 = @match(pattern input2 0)
+  ! expected2 = #Match{0 6}
+  
+  // Test with non-matching input
+  ! input3 = "abc"
+  ! result3 = @match(pattern input3 0)
+  ! expected3 = #NoMatch
+  
+  // Check results
+  ~(== result1 expected1) {
+    0: #Fail{expected1 result1}
+    _: 
+      ~(== result2 expected2) {
+        0: #Fail{expected2 result2}
+        _: 
+          ~(== result3 expected3) {
+            0: #Fail{expected3 result3}
+            _: #Pass
+          }
+      }
+  }
+
+// Run all tests
+@run_all_tests =
+  ! test_results = [
+    @run_test("test_literal" @test_literal),
+    @run_test("test_char" @test_char),
+    @run_test("test_concat" @test_concat),
+    @run_test("test_choice" @test_choice),
+    @run_test("test_star" @test_star),
+    @run_test("test_plus" @test_plus),
+    @run_test("test_optional" @test_optional),
+    @run_test("test_complex" @test_complex)
+  ]
+  
+  test_results
+
+// Main function to run tests
+@main = @run_all_tests

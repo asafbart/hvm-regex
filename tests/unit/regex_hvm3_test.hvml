@@ -1,0 +1,71 @@
+// HVM3 regex test with compatibility for the current HVM3 version
+
+// Simple pattern and result types
+data Pattern { #Literal{text} #Char{ch} }
+data Result { #Match{pos len} #NoMatch }
+
+// Match a literal string
+@match_literal(lit str pos) =
+  let str_len = len(str)
+  let lit_len = len(lit)
+  
+  ~(>= (- str_len pos) lit_len) {
+    true: 
+      let substr_to_check = substr(str pos lit_len)
+      ~(== substr_to_check lit) {
+        true: #Match{pos lit_len}
+        false: #NoMatch
+      }
+    false: #NoMatch
+  }
+
+// Match a character
+@match_char(ch str pos) =
+  let str_len = len(str)
+  
+  ~(< pos str_len) {
+    true:
+      let c = substr(str pos 1)
+      ~(== ch c) {
+        true: #Match{pos 1}
+        false: #NoMatch
+      }
+    false: #NoMatch
+  }
+
+// Main match function
+@match(pattern str pos) = ~pattern {
+  #Literal{text}: @match_literal(text str pos)
+  #Char{ch}: @match_char(ch str pos)
+}
+
+// Test helper
+@describe_match(result str) = ~result {
+  #Match{p l}: ["Match found at position" p "with length" l ":" substr(str p l)]
+  #NoMatch: "No match found"
+}
+
+// Main test function
+@main =
+  // Test data
+  let test_str = "hello world"
+  
+  // Test literal match
+  let test1 = @match(#Literal{"hello"} test_str 0)
+  let test2 = @match(#Literal{"world"} test_str 6)
+  let test3 = @match(#Literal{"xyz"} test_str 0)
+  
+  // Test character match
+  let test4 = @match(#Char{"h"} test_str 0)
+  let test5 = @match(#Char{"w"} test_str 6)
+  let test6 = @match(#Char{"x"} test_str 0)
+  
+  // Display results
+  {
+    test1: @describe_match(test1 test_str)
+    test2: @describe_match(test2 test_str)
+    test3: @describe_match(test3 test_str)
+    test4: @describe_match(test4 test_str)
+    test5: @describe_match(test5 test_str)
+    test6: @describe_match(test6 test_str)
+  }

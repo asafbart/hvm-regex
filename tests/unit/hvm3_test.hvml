@@ -1,0 +1,49 @@
+// HVM3 regex test using HVM3 syntax
+
+// Match result types
+@Match(pos len)
+@NoMatch
+
+// Pattern types
+@Literal(text)
+@Char(ch)
+
+// Match a literal string at the given position
+@match_literal(lit str pos) = 
+  let str_len = len(str)
+  let lit_len = len(lit)
+  
+  ~ (>= (- str_len pos) lit_len) {
+    true: 
+      let substr_to_check = substr(str pos lit_len)
+      ~ (== substr_to_check lit) {
+        true: @Match(pos lit_len)
+        false: @NoMatch
+      }
+    false: @NoMatch
+  }
+
+// Main matcher function
+@match(pattern str pos) = ~ pattern {
+  @Literal(text): @match_literal(text str pos)
+  @Char(ch): 
+    ~ (< pos len(str)) {
+      true:
+        let c = substr(str pos 1)
+        ~ (== ch c) {
+          true: @Match(pos 1)
+          false: @NoMatch
+        }
+      false: @NoMatch
+    }
+}
+
+// Run a simple test
+@main = 
+  // Test with a literal pattern "hello"
+  let result = @match(@Literal("hello") "hello world" 0)
+  
+  ~ result {
+    @Match(p l): ["Match found at:", p, "length:", l]
+    @NoMatch: "No match found"
+  }

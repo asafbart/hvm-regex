@@ -1,0 +1,184 @@
+// HVM3 Regex Example - How to use the regex engine
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// Character enum 
+data Char { #a #b #c #d #e #f #g #h #i #j #k #l #m #n #o #p #q #r #s #t #u #v #w #x #y #z }
+
+// Pattern types
+data Pattern { 
+  #Lit{val}       // Literal value
+  #Cat{a b}       // Concatenation
+  #Alt{a b}       // Alternation
+  #Rep{p}         // Repetition (star)
+  #Plus{p}        // One or more
+  #Opt{p}         // Optional
+}
+
+// Result type
+data Result { #Match{pos len} #NoMatch }
+
+// String patterns (enum representation)
+data StringPattern {
+  #GET            // "GET"
+  #POST           // "POST"
+  #a_star         // "a*"
+  #a_plus         // "a+"
+  #a_b            // "ab"
+  #a_alt_b        // "a|b"
+  #a_q_b          // "a?b"
+  #complex        // "a(b|c)*d"
+}
+
+// Input data type
+data Input {
+  #Empty
+  #Text{content}
+}
+
+// Match a literal
+@match_lit(val) = #Match{0 1}
+
+// Match concatenation
+@match_cat(a b) = 
+  ! ra = @match_pattern(a)
+  ~ ra {
+    #Match{p1 l1}: 
+      ! rb = @match_pattern(b)
+      ~ rb {
+        #Match{p2 l2}: #Match{0 (+ l1 l2)}
+        #NoMatch: #NoMatch
+      }
+    #NoMatch: #NoMatch
+  }
+
+// Match alternation
+@match_alt(a b) =
+  ! ra = @match_pattern(a)
+  ! rb = @match_pattern(b)
+  ~ ra {
+    #Match{p1 l1}: ra
+    #NoMatch: rb
+  }
+
+// Match repetition
+@match_rep(p) = #Match{0 0}
+
+// Match one or more
+@match_plus(p) = 
+  ! rp = @match_pattern(p)
+  ~ rp {
+    #Match{p1 l1}: rp
+    #NoMatch: #NoMatch
+  }
+
+// Match optional
+@match_opt(p) = 
+  ! rp = @match_pattern(p)
+  ~ rp {
+    #Match{p1 l1}: rp
+    #NoMatch: #Match{0 0}
+  }
+
+// Main pattern matching function
+@match_pattern(pattern) = ~ pattern {
+  #Lit{val}: @match_lit(val)
+  #Cat{a b}: @match_cat(a b)
+  #Alt{a b}: @match_alt(a b)
+  #Rep{p}: @match_rep(p)
+  #Plus{p}: @match_plus(p)
+  #Opt{p}: @match_opt(p)
+}
+
+// Parse a regex string
+@parse_regex(pattern_enum) = ~ pattern_enum {
+  #GET: #Lit{#g}  // Simplification for example
+  #POST: #Lit{#p}  // Simplification for example
+  #a_star: #Rep{#Lit{#a}}
+  #a_plus: #Plus{#Lit{#a}}
+  #a_b: #Cat{#Lit{#a} #Lit{#b}}
+  #a_alt_b: #Alt{#Lit{#a} #Lit{#b}}
+  #a_q_b: #Cat{#Opt{#Lit{#a}} #Lit{#b}}
+  #complex: 
+    // a(b|c)*d
+    ! a = #Lit{#a}
+    ! b = #Lit{#b}
+    ! c = #Lit{#c}
+    ! d = #Lit{#d}
+    ! bc = #Alt{b c}
+    ! bc_star = #Rep{bc}
+    ! abc = #Cat{a bc_star}
+    #Cat{abc d}
+  _: #Lit{#a}  // Default
+}
+
+// Match a regex pattern against input
+@match_regex(pattern_enum input) =
+  // Parse the pattern
+  ! pattern = @parse_regex(pattern_enum)
+  
+  // Match it against input
+  @match_pattern(pattern)
+
+// Example usage
+@example_basic() =
+  // Match a simple literal "a"
+  ! pattern = #Lit{#a}
+  ! result = @match_pattern(pattern)
+  ~ result {
+    #Match{p1 l1}: ["Matched with length" l1]
+    #NoMatch: "No match"
+  }
+
+// Example with a parsed regex
+@example_parsed() =
+  // Parse and match "a(b|c)*d"
+  ! pattern_enum = #complex
+  ! result = @match_regex(pattern_enum #Empty)
+  ~ result {
+    #Match{p1 l1}: ["Matched complex pattern with length" l1]
+    #NoMatch: "No match for complex pattern"
+  }
+
+// Example matching different patterns
+@example_multiple() =
+  // Create several patterns
+  ! patterns = [#a_b #a_star #a_plus #a_alt_b #a_q_b]
+  
+  // Match first pattern
+  ! result1 = @match_regex(#a_b #Empty)
+  
+  // Match second pattern
+  ! result2 = @match_regex(#a_star #Empty)
+  
+  // Match third pattern
+  ! result3 = @match_regex(#a_plus #Empty)
+  
+  // Return match lengths
+  ~ result1 {
+    #Match{p1 l1}: ~ result2 {
+      #Match{p2 l2}: ~ result3 {
+        #Match{p3 l3}: (+ l1 (+ l2 l3))
+        #NoMatch: 0
+      }
+      #NoMatch: 0
+    }
+    #NoMatch: 0
+  }
+
+// Main function
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}: 
+    // Try different examples
+    ! basic_result = @example_basic()
+    ! parsed_result = @example_parsed()
+    ! multiple_result = @example_multiple()
+    
+    // Return success
+    multiple_result
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}
