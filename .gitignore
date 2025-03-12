@@ -1,0 +1,31 @@
+# Build artifacts
+/build/
+/dist/
+*.o
+*.so
+*.a
+*.dll
+*.dylib
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.sublime-*
+.DS_Store
+
+# Local environment and setup
+.env
+/venv/
+/env/
+/.python-version
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local installation notes
+INSTALLATION_NOTES.md
+
+# Test results and benchmarks
+/benchmarks/results/
+/tests/results/
