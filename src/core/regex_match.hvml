@@ -1,0 +1,36 @@
+// Basic regex pattern matching with data types
+
+// Pattern types
+data Pattern {
+  #Literal
+  #Char
+  #Concat { first second }
+}
+
+// Match result
+data Result {
+  #Match { pos len }
+  #NoMatch
+}
+
+// Main matcher function
+@match(pattern) = ~pattern {
+  #Literal: #Match{0 3}  // Mock implementation - match with length 3
+  #Char: #Match{0 1}     // Mock implementation - match with length 1
+  #Concat{first second}: 
+    ~@match(first) {
+      #Match{p1 l1}: ~@match(second) {
+        #Match{p2 l2}: #Match{0 (+ l1 l2)}  // Both parts matched
+        #NoMatch: #NoMatch                  // Second part didn't match
+      }
+      #NoMatch: #NoMatch                    // First part didn't match
+    }
+}
+
+// Main function
+@main = 
+  // Test simple literal match
+  ~@match(#Literal) {
+    #Match{pos len}: len
+    #NoMatch: 0
+  }

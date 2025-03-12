@@ -1,0 +1,39 @@
+// Parallel pattern matching benchmark
+@include "multi_pattern_impl.hvml"
+
+// Run benchmark
+@parallel_benchmark =
+  // Get subset of patterns
+  let patterns = (slice @snort_patterns 0 25)
+  
+  // Get test traffic - concatenate all samples for thorough testing
+  let all_traffic = {
+    id: 0,
+    text: (+ (+ (+ (+ @traffic_samples[0].text @traffic_samples[1].text) 
+                    @traffic_samples[2].text) @traffic_samples[3].text)
+              @traffic_samples[4].text)
+  }
+  
+  // Build the multi-pattern matcher
+  let matcher = @build_snort_matcher(patterns)
+  
+  // Run the benchmark
+  let start_time = @current_time_ms()
+  
+  // Match all patterns in parallel
+  let match_result = @match_traffic(matcher, all_traffic)
+  
+  let end_time = @current_time_ms()
+  let elapsed = (- end_time start_time)
+  
+  // Return timing and match count
+  {
+    elapsed_ms: elapsed,
+    match_count: (len match_result.matches),
+    pattern_count: (len patterns)
+  }
+
+// Use stub for time function
+@current_time_ms = 0  // Will be replaced with proper implementation
+
+@main = @parallel_benchmark

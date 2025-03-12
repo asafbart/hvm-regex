@@ -1,0 +1,126 @@
+// Regex pattern compilation for HVM
+// This module pre-compiles regex patterns to avoid reparsing on each match
+
+// Include the basic parser
+@include "regex_parser.hvml"
+
+// A simple pattern cache
+// Key: pattern string, Value: compiled AST
+data Cache {
+  #Empty
+  #Entry { pattern ast next }
+}
+
+// Initialize an empty cache
+@init_cache = #Empty
+
+// Look up a pattern in the cache
+@cache_lookup(cache, pattern) = ~cache {
+  #Empty: {0, #Empty}  // Not found, return 0 and empty
+  
+  #Entry{entry_pattern entry_ast next}:
+    ~(== entry_pattern pattern) {
+      // Found the pattern
+      1: {1, entry_ast}  // Return 1 (found) and the AST
+      
+      // Not this entry, check the next one
+      0: @cache_lookup(next, pattern)
+    }
+}
+
+// Add a pattern to the cache
+@cache_add(cache, pattern, ast) = 
+  // Create a new entry
+  #Entry{pattern ast cache}
+
+// Compile a pattern (parse if not in cache)
+@compile(pattern, cache) =
+  // First look for the pattern in the cache
+  ! lookup = @cache_lookup(cache, pattern)
+  
+  ~(lookup.0) {
+    // Pattern found in cache
+    1: {lookup.1, cache}
+    
+    // Pattern not found, compile it and add to cache
+    0:
+      // Parse the pattern (from regex_parser.hvml)
+      ! ast = @parse(pattern)
+      
+      // Add to cache and return
+      ! new_cache = @cache_add(cache, pattern, ast)
+      {ast, new_cache}
+  }
+
+// Match a compiled pattern against text
+@match_compiled(ast, text, pos) =
+  // Use the match function from regex_parser.hvml
+  @match(ast, text, pos)
+
+// Compile and match a pattern
+@compile_and_match(pattern, text, pos, cache) =
+  // First compile the pattern
+  ! compile_result = @compile(pattern, cache)
+  ! ast = compile_result.0
+  ! new_cache = compile_result.1
+  
+  // Then match using the compiled AST
+  ! match_result = @match_compiled(ast, text, pos)
+  
+  // Return the match result and the updated cache
+  {match_result, new_cache}
+
+// Main regex matcher function with cached compilation
+@match_regex_compiled(pattern, text, start_pos, cache) =
+  // Compile and match
+  ! result = @compile_and_match(pattern, text, start_pos, cache)
+  ! match_result = result.0
+  ! new_cache = result.1
+  
+  ~match_result {
+    #Match{pos len}:
+      // Return the matched text
+      ! matched = (substr text pos len)
+      {{matched, pos, len}, new_cache}
+    
+    #NoMatch: {{"", -1, 0}, new_cache}  // No match
+  }
+
+// Entry point for testing
+@main =
+  // Initialize cache
+  ! cache = @init_cache
+  
+  // Test patterns
+  ! patterns = ["a(b|c)*d", "a+b", "[abc]d", "GET|POST"]
+  ! text = "abcbcd"
+  
+  // Match each pattern against the text
+  @match_patterns(patterns, text, cache, idx) =
+    ~(< idx (len patterns)) {
+      1:
+        // Get the current pattern
+        ! pattern = (get patterns idx)
+        
+        // Compile and match
+        ! result = @match_regex_compiled(pattern, text, 0, cache)
+        ! match_result = result.0
+        ! new_cache = result.1
+        
+        // Print the result
+        ! result_str = ~(== match_result.1 -1) {
+          1: (+ "Pattern '" (+ pattern "' did not match"))
+          0: (+ "Pattern '" (+ pattern (+ "' matched: " match_result.0)))
+        }
+        
+        // Process the next pattern with the updated cache
+        ! next_result = @match_patterns(patterns, text, new_cache, (+ idx 1))
+        
+        // Combine this result with the next ones
+        (+ result_str (+ "\n" next_result))
+        
+      0: ""  // End of patterns
+    }
+  
+  // Start matching
+  @match_patterns(patterns, text, cache, 0)

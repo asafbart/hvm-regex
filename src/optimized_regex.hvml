@@ -1,0 +1,971 @@
+// Optimized HVM3 regex implementation leveraging HVM's natural parallelism
+// This implementation focuses on using HVM's strengths for better performance
+
+// Result types - keeping compatibility with basic_regex.hvml
+data Result {
+  #Match { pos len }                               // Basic match result with position and length
+  #MatchGroup { pos len group_pos group_len }      // Match with first captured group
+  #MatchGroups { pos len group1_pos group1_len group2_pos group2_len }  // Match with two captured groups 
+  #NoMatch                                        // No match result
+}
+
+// Pattern types - using a more structured approach for composition
+data Pattern {
+  #Literal { str }                  // Literal string, e.g., "GET"
+  #Char { c }                       // Single character, e.g., 'a'
+  #Any                              // Any character (like . in regex)
+  #Concat { a b }                   // Concatenation of two patterns
+  #Alt { a b }                      // Alternative patterns (a|b)
+  #Star { node }                    // Zero or more repetitions (a*)
+  #Plus { node }                    // One or more repetitions (a+)
+  #Optional { node }                // Zero or one repetition (a?)
+  #Repeat { node n }                // Exactly n repetitions (a{n})
+  #RepeatRange { node min max }     // Range of repetitions (a{min,max})
+  #CharClass { chars }              // Character class (e.g., [abc])
+  #NegCharClass { chars }           // Negated character class (e.g., [^abc])
+  #Group { node }                   // Capturing group (e.g., (a))
+  #AnchorStart                      // Start of string anchor (^)
+  #AnchorEnd                        // End of string anchor ($)
+  #WordBoundary                     // Word boundary (\b)
+  #NonWordBoundary                  // Non-word boundary (\B)
+  #PosLookahead { node }            // Positive lookahead (e.g., a(?=b))
+  #NegLookahead { node }            // Negative lookahead (e.g., a(?!b))
+  #PosLookbehind { node }           // Positive lookbehind (e.g., (?<=a)b)
+  #NegLookbehind { node }           // Negative lookbehind (e.g., (?<!a)b)
+}
+
+// Match a literal string (e.g., "GET")
+@match_literal(str, text, pos) =
+  // Check if we're at end of text
+  ~(>= pos (len text)) {
+    1: #NoMatch  // End of text, no match
+    
+    // Check if the literal string fits within the remaining text
+    0: 
+      ! text_len = (len text)
+      ! str_len = (len str)
+      
+      // Make sure the string fits in the remaining text
+      ~(> (+ pos str_len) text_len) {
+        1: #NoMatch  // Not enough characters left
+        
+        // Extract and compare substring
+        0:
+          ! substring = (substr text pos str_len)
+          ~(== substring str) {
+            1: #Match{pos str_len}  // Match found
+            0: #NoMatch              // No match
+          }
+      }
+  }
+
+// Match a single character
+@match_char(c, text, pos) =
+  // Check if we're at end of text
+  ~(>= pos (len text)) {
+    1: #NoMatch  // End of text, no match
+    
+    // Compare character
+    0:
+      ! curr = (substr text pos 1)
+      ~(== curr c) {
+        1: #Match{pos 1}  // Match found
+        0: #NoMatch       // No match
+      }
+  }
+
+// Match any character (.)
+@match_any(text, pos) =
+  // Check if we're at end of text
+  ~(>= pos (len text)) {
+    1: #NoMatch  // End of text, no match
+    
+    // Any character matches as long as we're not at end of text
+    0: #Match{pos 1}
+  }
+
+// Character class helper function - check if a character is in a class
+@char_in_class(char, chars) =
+  // Implementation using iteration rather than hardcoded cases
+  @char_in_class_iter(c, chars, i) =
+    ~(< i (len chars)) {
+      1:
+        ! curr = (get chars i)
+        ~(== c curr) {
+          1: 1  // Character found
+          0: @char_in_class_iter(c, chars, (+ i 1))  // Keep looking
+        }
+      0: 0  // Not found
+    }
+  
+  // Start iteration at index 0
+  @char_in_class_iter(char, chars, 0)
+
+// Match a character class (e.g., [abc])
+@match_char_class(chars, text, pos) =
+  // Check if we're at end of text
+  ~(>= pos (len text)) {
+    1: #NoMatch  // End of text, no match
+    
+    // Check if current character is in the class
+    0:
+      ! curr = (substr text pos 1)
+      ! in_class = @char_in_class(curr, chars)
+      
+      ~in_class {
+        1: #Match{pos 1}  // Match found
+        0: #NoMatch       // No match
+      }
+  }
+
+// Match a negated character class (e.g., [^abc])
+@match_neg_char_class(chars, text, pos) =
+  // Check if we're at end of text
+  ~(>= pos (len text)) {
+    1: #NoMatch  // End of text, no match
+    
+    // Check if current character is NOT in the class
+    0:
+      ! curr = (substr text pos 1)
+      ! in_class = @char_in_class(curr, chars)
+      
+      ~in_class {
+        1: #NoMatch       // Character is in class, so negated class doesn't match
+        0: #Match{pos 1}  // Character not in class, so negated class matches
+      }
+  }
+
+// Word character test function - returns 1 if char is a word character, 0 otherwise
+@is_word_char(char) = 
+  // Simplified version for testing - check a few common word characters
+  ~char {
+    // Letters (just a few examples for brevity)
+    'a': 1 'b': 1 'c': 1 'd': 1 'e': 1 'f': 1 'g': 1 'h': 1 'i': 1
+    'j': 1 'k': 1 'l': 1 'm': 1 'n': 1 'o': 1 'p': 1 'q': 1 'r': 1
+    // Uppercase letters
+    'A': 1 'B': 1 'C': 1 'D': 1 'E': 1 'F': 1 'G': 1 'H': 1 'I': 1
+    // Digits
+    '0': 1 '1': 1 '2': 1 '3': 1 '4': 1 '5': 1 '6': 1 '7': 1 '8': 1 '9': 1
+    // Underscore
+    '_': 1
+    // All other characters are not word characters
+    _: 0
+  }
+
+// Match a word boundary (\b)
+@match_word_boundary(text, pos) =
+  // Check for word boundary at this position
+  ! text_len = (len text)
+  ! is_boundary = 0  // Default to not a boundary
+  
+  // Case 1: At start of string
+  ~(== pos 0) {
+    1: 
+      ~(< pos text_len) {
+        1: 
+          // If first char is a word char, it's a boundary
+          ! first_char = (substr text pos 1)
+          ! is_first_word = @is_word_char(first_char)
+          ~is_first_word {
+            1: #Match{pos 0}  // It's a boundary
+            0: #NoMatch       // Not a boundary
+          }
+        0: #NoMatch  // Empty string, no boundary
+      }
+    
+    // Case 2: At end of string
+    0: ~(== pos text_len) {
+      1:
+        ~(> pos 0) {
+          1:
+            // If last char is a word char, it's a boundary
+            ! last_char = (substr text (- pos 1) 1)
+            ! is_last_word = @is_word_char(last_char)
+            ~is_last_word {
+              1: #Match{pos 0}  // It's a boundary
+              0: #NoMatch       // Not a boundary
+            }
+          0: #NoMatch  // Empty string, no boundary
+        }
+      
+      // Case 3: In the middle of the string
+      0:
+        ~(& (> pos 0) (< pos text_len)) {
+          1:
+            // Check for transition between word/non-word
+            ! prev_char = (substr text (- pos 1) 1)
+            ! curr_char = (substr text pos 1)
+            ! is_prev_word = @is_word_char(prev_char)
+            ! is_curr_word = @is_word_char(curr_char)
+            
+            // If there's a transition, it's a boundary
+            ~(== is_prev_word is_curr_word) {
+              1: #NoMatch       // No transition, not a boundary
+              0: #Match{pos 0}  // Transition, it's a boundary
+            }
+          0: #NoMatch  // Invalid position
+        }
+    }
+  }
+
+// Match a non-word boundary (\B)
+@match_non_word_boundary(text, pos) =
+  // Check for non-word boundary at this position (opposite of word boundary)
+  ! text_len = (len text)
+  
+  // Case 1: At start of string
+  ~(== pos 0) {
+    1: 
+      ~(< pos text_len) {
+        1: 
+          // If first char is NOT a word char, it's a non-boundary
+          ! first_char = (substr text pos 1)
+          ! is_first_word = @is_word_char(first_char)
+          ~is_first_word {
+            1: #NoMatch       // Word char, so not a non-boundary
+            0: #Match{pos 0}  // Non-word char, so it's a non-boundary
+          }
+        0: #NoMatch  // Empty string, no boundary of any kind
+      }
+    
+    // Case 2: At end of string
+    0: ~(== pos text_len) {
+      1:
+        ~(> pos 0) {
+          1:
+            // If last char is NOT a word char, it's a non-boundary
+            ! last_char = (substr text (- pos 1) 1)
+            ! is_last_word = @is_word_char(last_char)
+            ~is_last_word {
+              1: #NoMatch       // Word char, so not a non-boundary
+              0: #Match{pos 0}  // Non-word char, so it's a non-boundary
+            }
+          0: #NoMatch  // Empty string, no boundary of any kind
+        }
+      
+      // Case 3: In the middle of the string
+      0:
+        ~(& (> pos 0) (< pos text_len)) {
+          1:
+            // Check for NO transition between word/non-word
+            ! prev_char = (substr text (- pos 1) 1)
+            ! curr_char = (substr text pos 1)
+            ! is_prev_word = @is_word_char(prev_char)
+            ! is_curr_word = @is_word_char(curr_char)
+            
+            // If there's NO transition, it's a non-boundary
+            ~(== is_prev_word is_curr_word) {
+              1: #Match{pos 0}  // No transition, it's a non-boundary
+              0: #NoMatch       // Transition, not a non-boundary
+            }
+          0: #NoMatch  // Invalid position
+        }
+    }
+  }
+
+// Match start of string anchor (^)
+@match_anchor_start(pos) =
+  // Only matches at position 0
+  ~(== pos 0) {
+    1: #Match{pos 0}  // Match at start with zero width
+    0: #NoMatch       // No match at other positions
+  }
+
+// Match end of string anchor ($)
+@match_anchor_end(text, pos) =
+  // Only matches at end of string
+  ~(== pos (len text)) {
+    1: #Match{pos 0}  // Match at end with zero width
+    0: #NoMatch       // No match at other positions
+  }
+
+// Match a concatenation (e.g., ab)
+// This is where we'll use a more sequential approach
+@match_concat(a, b, text, pos) =
+  // Match first part
+  ! result_a = @match(a, text, pos)
+  
+  // If first part matches, try the second part
+  ~result_a {
+    #Match{a_pos a_len}:
+      // If first part matches, try to match second part at new position
+      ! new_pos = (+ pos a_len)
+      ! result_b = @match(b, text, new_pos)
+      
+      // Combine results if both parts match
+      ~result_b {
+        #Match{b_pos b_len}:
+          // Both parts match, return combined match
+          #Match{pos (+ a_len b_len)}
+          
+        #MatchGroup{b_pos b_len b_group_pos b_group_len}:
+          // Second part has a group, preserve it
+          #MatchGroup{pos (+ a_len b_len) b_group_pos b_group_len}
+          
+        #MatchGroups{b_pos b_len b_g1_pos b_g1_len b_g2_pos b_g2_len}:
+          // Second part has multiple groups, preserve them
+          #MatchGroups{pos (+ a_len b_len) b_g1_pos b_g1_len b_g2_pos b_g2_len}
+        
+        #NoMatch: #NoMatch  // Second part doesn't match
+      }
+      
+    #MatchGroup{a_pos a_len a_group_pos a_group_len}:
+      // First part has a group, try to match second part
+      ! new_pos = (+ pos a_len)
+      ! result_b = @match(b, text, new_pos)
+      
+      // Combine results if both parts match
+      ~result_b {
+        #Match{b_pos b_len}:
+          // First part has a group, second doesn't
+          #MatchGroup{pos (+ a_len b_len) a_group_pos a_group_len}
+          
+        #MatchGroup{b_pos b_len b_group_pos b_group_len}:
+          // Both parts have groups, return as multiple groups
+          #MatchGroups{pos (+ a_len b_len) a_group_pos a_group_len b_group_pos b_group_len}
+          
+        #MatchGroups{b_pos b_len b_g1_pos b_g1_len b_g2_pos b_g2_len}:
+          // First part has one group, second has multiple - too complex for MatchGroups
+          // Just return the first group (simplification)
+          #MatchGroup{pos (+ a_len b_len) a_group_pos a_group_len}
+        
+        #NoMatch: #NoMatch  // Second part doesn't match
+      }
+      
+    #MatchGroups{a_pos a_len a_g1_pos a_g1_len a_g2_pos a_g2_len}:
+      // First part has multiple groups, try to match second part
+      ! new_pos = (+ pos a_len)
+      ! result_b = @match(b, text, new_pos)
+      
+      // Combine results if both parts match
+      ~result_b {
+        #Match{b_pos b_len}:
+          // First part has multiple groups, second doesn't
+          #MatchGroups{pos (+ a_len b_len) a_g1_pos a_g1_len a_g2_pos a_g2_len}
+          
+        #MatchGroup{b_pos b_len b_group_pos b_group_len}:
+          // First part has multiple groups, second has one - too complex for MatchGroups
+          // Just return the first two groups (simplification)
+          #MatchGroups{pos (+ a_len b_len) a_g1_pos a_g1_len a_g2_pos a_g2_len}
+          
+        #MatchGroups{b_pos b_len b_g1_pos b_g1_len b_g2_pos b_g2_len}:
+          // Both parts have multiple groups - too complex for MatchGroups
+          // Just return the first two groups (simplification)
+          #MatchGroups{pos (+ a_len b_len) a_g1_pos a_g1_len a_g2_pos a_g2_len}
+        
+        #NoMatch: #NoMatch  // Second part doesn't match
+      }
+    
+    #NoMatch: #NoMatch  // First part doesn't match
+  }
+
+// Match alternatives (a|b) with parallel evaluation
+// This is where HVM3's natural parallelism shines!
+@match_alt(a, b, text, pos) =
+  // Both matches evaluated in parallel due to HVM's reduction strategy
+  // Each match gets its own processor with HVM3
+  ! result_a = @match(a, text, pos)
+  ! result_b = @match(b, text, pos)
+  
+  // Check results in order, preferring the first alternative
+  ~result_a {
+    #Match{a_pos a_len}: result_a  // First alternative matched
+    #MatchGroup{a_pos a_len a_group_pos a_group_len}: result_a  // First alternative matched with group
+    #MatchGroups{a_pos a_len a_g1_pos a_g1_len a_g2_pos a_g2_len}: result_a  // First alternative matched with multiple groups
+    
+    #NoMatch: 
+      // First alternative didn't match, check second
+      ~result_b {
+        #Match{b_pos b_len}: result_b  // Second alternative matched
+        #MatchGroup{b_pos b_len b_group_pos b_group_len}: result_b  // Second alternative matched with group
+        #MatchGroups{b_pos b_len b_g1_pos b_g1_len b_g2_pos b_g2_len}: result_b  // Second alternative matched with multiple groups
+        #NoMatch: #NoMatch  // Neither alternative matched
+      }
+  }
+
+// Match zero or more repetitions (a*) with new approach for HVM3
+// This implementation leverages lazy evaluation
+@match_star(node, text, pos) =
+  // Try to match zero repetitions first (greedy approach)
+  ! zero_match = #Match{pos 0}  // Match with length 0
+  
+  // Try to match one or more repetitions
+  ! result = @match(node, text, pos)
+  
+  ~result {
+    #Match{r_pos r_len}:
+      // Matched once, try to match more recursively
+      ! new_pos = (+ pos r_len)
+      ! rest_result = @match_star(node, text, new_pos)
+      
+      ~rest_result {
+        #Match{rest_pos rest_len}:
+          // Combine current match with rest of matches
+          #Match{pos (+ r_len rest_len)}
+        #MatchGroup{rest_pos rest_len rest_group_pos rest_group_len}:
+          // Rest has a group, preserve it
+          #MatchGroup{pos (+ r_len rest_len) rest_group_pos rest_group_len}
+        #MatchGroups{rest_pos rest_len rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}:
+          // Rest has multiple groups, preserve them
+          #MatchGroups{pos (+ r_len rest_len) rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}
+        #NoMatch:
+          // No more matches, return current match
+          #Match{pos r_len}
+      }
+      
+    #MatchGroup{r_pos r_len r_group_pos r_group_len}:
+      // Matched once with a group, prioritize this group
+      ! new_pos = (+ pos r_len)
+      ! rest_result = @match_star(node, text, new_pos)
+      
+      ~rest_result {
+        #Match{rest_pos rest_len}:
+          // Rest has no group, preserve our group
+          #MatchGroup{pos (+ r_len rest_len) r_group_pos r_group_len}
+        #MatchGroup{rest_pos rest_len rest_group_pos rest_group_len}:
+          // Both have groups, return only the first one (simplification)
+          #MatchGroup{pos (+ r_len rest_len) r_group_pos r_group_len}
+        #MatchGroups{rest_pos rest_len rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}:
+          // Too complex for our result types, prioritize current group
+          #MatchGroup{pos (+ r_len rest_len) r_group_pos r_group_len}
+        #NoMatch:
+          // No more matches, return current match with group
+          #MatchGroup{pos r_len r_group_pos r_group_len}
+      }
+      
+    #MatchGroups{r_pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}:
+      // Matched once with multiple groups, prioritize these groups
+      ! new_pos = (+ pos r_len)
+      ! rest_result = @match_star(node, text, new_pos)
+      
+      ~rest_result {
+        #Match{rest_pos rest_len}:
+          // Rest has no groups, preserve our groups
+          #MatchGroups{pos (+ r_len rest_len) r_g1_pos r_g1_len r_g2_pos r_g2_len}
+        #MatchGroup{rest_pos rest_len rest_group_pos rest_group_len}:
+          // Too complex for our result types, prioritize current groups
+          #MatchGroups{pos (+ r_len rest_len) r_g1_pos r_g1_len r_g2_pos r_g2_len}
+        #MatchGroups{rest_pos rest_len rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}:
+          // Too complex for our result types, prioritize current groups
+          #MatchGroups{pos (+ r_len rest_len) r_g1_pos r_g1_len r_g2_pos r_g2_len}
+        #NoMatch:
+          // No more matches, return current match with groups
+          #MatchGroups{pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}
+      }
+      
+    #NoMatch:
+      // Node didn't match, so * matches zero times
+      zero_match
+  }
+
+// Match one or more repetitions (a+)
+@match_plus(node, text, pos) =
+  // Must match at least once
+  ! result = @match(node, text, pos)
+  
+  ~result {
+    #Match{r_pos r_len}:
+      // Matched once, try to match more recursively
+      ! new_pos = (+ pos r_len)
+      ! rest_result = @match_star(node, text, new_pos)
+      
+      ~rest_result {
+        #Match{rest_pos rest_len}:
+          // Combine current match with rest of matches
+          #Match{pos (+ r_len rest_len)}
+        #MatchGroup{rest_pos rest_len rest_group_pos rest_group_len}:
+          // Rest has a group, preserve it
+          #MatchGroup{pos (+ r_len rest_len) rest_group_pos rest_group_len}
+        #MatchGroups{rest_pos rest_len rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}:
+          // Rest has multiple groups, preserve them
+          #MatchGroups{pos (+ r_len rest_len) rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}
+        #NoMatch:
+          // No more matches, return current match
+          #Match{pos r_len}
+      }
+      
+    #MatchGroup{r_pos r_len r_group_pos r_group_len}:
+      // Similar logic for group matches
+      ! new_pos = (+ pos r_len)
+      ! rest_result = @match_star(node, text, new_pos)
+      
+      ~rest_result {
+        #Match{rest_pos rest_len}:
+          #MatchGroup{pos (+ r_len rest_len) r_group_pos r_group_len}
+        #MatchGroup{rest_pos rest_len rest_group_pos rest_group_len}:
+          #MatchGroup{pos (+ r_len rest_len) r_group_pos r_group_len}
+        #MatchGroups{rest_pos rest_len rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}:
+          #MatchGroup{pos (+ r_len rest_len) r_group_pos r_group_len}
+        #NoMatch:
+          #MatchGroup{pos r_len r_group_pos r_group_len}
+      }
+      
+    #MatchGroups{r_pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}:
+      // Similar logic for multiple group matches
+      ! new_pos = (+ pos r_len)
+      ! rest_result = @match_star(node, text, new_pos)
+      
+      ~rest_result {
+        #Match{rest_pos rest_len}:
+          #MatchGroups{pos (+ r_len rest_len) r_g1_pos r_g1_len r_g2_pos r_g2_len}
+        #MatchGroup{rest_pos rest_len rest_group_pos rest_group_len}:
+          #MatchGroups{pos (+ r_len rest_len) r_g1_pos r_g1_len r_g2_pos r_g2_len}
+        #MatchGroups{rest_pos rest_len rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}:
+          #MatchGroups{pos (+ r_len rest_len) r_g1_pos r_g1_len r_g2_pos r_g2_len}
+        #NoMatch:
+          #MatchGroups{pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}
+      }
+      
+    #NoMatch:
+      // Must match at least once for + operator
+      #NoMatch
+  }
+
+// Match zero or one repetition (a?)
+@match_optional(node, text, pos) =
+  // Try to match once
+  ! result = @match(node, text, pos)
+  
+  ~result {
+    #Match{r_pos r_len}: result  // Matched once
+    #MatchGroup{r_pos r_len r_group_pos r_group_len}: result  // Matched once with group
+    #MatchGroups{r_pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}: result  // Matched once with groups
+    
+    #NoMatch:
+      // Zero matches is valid for ? operator
+      #Match{pos 0}  // Match with length 0
+  }
+
+// Match exact repetition (a{n})
+@match_repeat(node, n, text, pos) =
+  // Recursively match n times
+  @match_repeat_n(node, n, text, pos, 0) =
+    ~(== n 0) {
+      1: #Match{pos 0}  // Matched 0 times, return zero-width match
+      
+      0:
+        // Try to match once
+        ! result = @match(node, text, pos)
+        
+        ~result {
+          #Match{r_pos r_len}:
+            // Matched once, continue with n-1 repetitions
+            ! new_pos = (+ pos r_len)
+            ! rest_result = @match_repeat_n(node, (- n 1), text, new_pos, (+ r_len 0))
+            
+            ~rest_result {
+              #Match{rest_pos rest_len}:
+                // Combine current match with rest of matches
+                #Match{pos (+ r_len rest_len)}
+              #MatchGroup{rest_pos rest_len rest_group_pos rest_group_len}:
+                // Rest has a group, preserve it
+                #MatchGroup{pos (+ r_len rest_len) rest_group_pos rest_group_len}
+              #MatchGroups{rest_pos rest_len rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}:
+                // Rest has multiple groups, preserve them
+                #MatchGroups{pos (+ r_len rest_len) rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}
+              #NoMatch:
+                // Couldn't complete all repetitions
+                #NoMatch
+            }
+            
+          #MatchGroup{r_pos r_len r_group_pos r_group_len}:
+            // Similar logic for group matches
+            ! new_pos = (+ pos r_len)
+            ! rest_result = @match_repeat_n(node, (- n 1), text, new_pos, (+ r_len 0))
+            
+            ~rest_result {
+              #Match{rest_pos rest_len}:
+                #MatchGroup{pos (+ r_len rest_len) r_group_pos r_group_len}
+              #MatchGroup{rest_pos rest_len rest_group_pos rest_group_len}:
+                // Multiple groups not supported well, prioritize first
+                #MatchGroup{pos (+ r_len rest_len) r_group_pos r_group_len}
+              #MatchGroups{rest_pos rest_len rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}:
+                // Multiple groups not supported well, prioritize first
+                #MatchGroup{pos (+ r_len rest_len) r_group_pos r_group_len}
+              #NoMatch:
+                #NoMatch
+            }
+            
+          #MatchGroups{r_pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}:
+            // Similar logic for multiple group matches
+            ! new_pos = (+ pos r_len)
+            ! rest_result = @match_repeat_n(node, (- n 1), text, new_pos, (+ r_len 0))
+            
+            ~rest_result {
+              #Match{rest_pos rest_len}:
+                #MatchGroups{pos (+ r_len rest_len) r_g1_pos r_g1_len r_g2_pos r_g2_len}
+              #MatchGroup{rest_pos rest_len rest_group_pos rest_group_len}:
+                // Multiple groups not supported well, prioritize first two
+                #MatchGroups{pos (+ r_len rest_len) r_g1_pos r_g1_len r_g2_pos r_g2_len}
+              #MatchGroups{rest_pos rest_len rest_g1_pos rest_g1_len rest_g2_pos rest_g2_len}:
+                // Multiple groups not supported well, prioritize first two
+                #MatchGroups{pos (+ r_len rest_len) r_g1_pos r_g1_len r_g2_pos r_g2_len}
+              #NoMatch:
+                #NoMatch
+            }
+            
+          #NoMatch:
+            // Failed to match once, so entire repetition fails
+            #NoMatch
+        }
+    }
+  
+  // Start recursive matching with n repetitions
+  @match_repeat_n(node, n, text, pos, 0)
+
+// Match range of repetitions (a{min,max})
+@match_repeat_range(node, min, max, text, pos) =
+  // Try to match min times first
+  ! min_result = @match_repeat(node, min, text, pos)
+  
+  ~min_result {
+    #Match{r_pos r_len}:
+      // Matched min times, now try to match up to (max-min) more times greedily
+      ! new_pos = (+ pos r_len)
+      ! remaining = (- max min)
+      
+      // Try to match more using a lazy star approach
+      @match_up_to_n(node, remaining, text, curr_pos, curr_len) =
+        ~(== remaining 0) {
+          1: #Match{pos curr_len}  // Reached max repetitions
+          
+          0:
+            // Try to match once more
+            ! result = @match(node, text, curr_pos)
+            
+            ~result {
+              #Match{r2_pos r2_len}:
+                // Matched once more, try for more
+                ! next_pos = (+ curr_pos r2_len)
+                ! next_len = (+ curr_len r2_len)
+                
+                // Either stop here or continue matching
+                ! continue_result = @match_up_to_n(node, (- remaining 1), text, next_pos, next_len)
+                // Notice we don't need to explicitly handle the "stop here" case
+                // because HVM's evaluation model optimizes this automatically!
+                continue_result
+                
+              #MatchGroup{r2_pos r2_len r2_group_pos r2_group_len}:
+                // Matched with a group, prioritize this group
+                ! next_pos = (+ curr_pos r2_len)
+                ! next_len = (+ curr_len r2_len)
+                #MatchGroup{pos next_len r2_group_pos r2_group_len}
+                
+              #MatchGroups{r2_pos r2_len r2_g1_pos r2_g1_len r2_g2_pos r2_g2_len}:
+                // Matched with multiple groups, prioritize these groups
+                ! next_pos = (+ curr_pos r2_len)
+                ! next_len = (+ curr_len r2_len)
+                #MatchGroups{pos next_len r2_g1_pos r2_g1_len r2_g2_pos r2_g2_len}
+                
+              #NoMatch:
+                // No more matches, return current count
+                #Match{pos curr_len}
+            }
+        }
+      
+      // Start trying to match additional repetitions after matching min
+      @match_up_to_n(node, remaining, text, new_pos, r_len)
+      
+    #MatchGroup{r_pos r_len r_group_pos r_group_len}:
+      // Matched min times with a group, similar logic
+      ! new_pos = (+ pos r_len)
+      ! remaining = (- max min)
+      
+      // Try to match more, preserving the group
+      @match_up_to_n_with_group(node, remaining, text, curr_pos, curr_len, group_pos, group_len) =
+        ~(== remaining 0) {
+          1: #MatchGroup{pos curr_len group_pos group_len}  // Reached max repetitions
+          
+          0:
+            // Try to match once more
+            ! result = @match(node, text, curr_pos)
+            
+            ~result {
+              #Match{r2_pos r2_len}:
+                // Matched once more without a group, preserve our existing group
+                ! next_pos = (+ curr_pos r2_len)
+                ! next_len = (+ curr_len r2_len)
+                
+                ! continue_result = @match_up_to_n_with_group(node, (- remaining 1), text, next_pos, next_len, group_pos, group_len)
+                continue_result
+                
+              #MatchGroup{r2_pos r2_len r2_group_pos r2_group_len}:
+                // Matched with another group, prioritize first group
+                ! next_pos = (+ curr_pos r2_len)
+                ! next_len = (+ curr_len r2_len)
+                #MatchGroup{pos next_len group_pos group_len}
+                
+              #MatchGroups{r2_pos r2_len r2_g1_pos r2_g1_len r2_g2_pos r2_g2_len}:
+                // Matched with more groups, prioritize first group
+                ! next_pos = (+ curr_pos r2_len)
+                ! next_len = (+ curr_len r2_len)
+                #MatchGroup{pos next_len group_pos group_len}
+                
+              #NoMatch:
+                // No more matches, return current count with group
+                #MatchGroup{pos curr_len group_pos group_len}
+            }
+        }
+      
+      // Start trying to match additional repetitions with group
+      @match_up_to_n_with_group(node, remaining, text, new_pos, r_len, r_group_pos, r_group_len)
+      
+    #MatchGroups{r_pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}:
+      // Matched min times with multiple groups, similar logic
+      ! new_pos = (+ pos r_len)
+      ! remaining = (- max min)
+      
+      // Try to match more, preserving the groups
+      @match_up_to_n_with_groups(node, remaining, text, curr_pos, curr_len, g1_pos, g1_len, g2_pos, g2_len) =
+        ~(== remaining 0) {
+          1: #MatchGroups{pos curr_len g1_pos g1_len g2_pos g2_len}  // Reached max repetitions
+          
+          0:
+            // Try to match once more
+            ! result = @match(node, text, curr_pos)
+            
+            ~result {
+              #Match{r2_pos r2_len}:
+                // Matched once more without groups, preserve our existing groups
+                ! next_pos = (+ curr_pos r2_len)
+                ! next_len = (+ curr_len r2_len)
+                
+                ! continue_result = @match_up_to_n_with_groups(node, (- remaining 1), text, next_pos, next_len, g1_pos, g1_len, g2_pos, g2_len)
+                continue_result
+                
+              #MatchGroup{r2_pos r2_len r2_group_pos r2_group_len}:
+                // Matched with another group, prioritize existing groups
+                ! next_pos = (+ curr_pos r2_len)
+                ! next_len = (+ curr_len r2_len)
+                #MatchGroups{pos next_len g1_pos g1_len g2_pos g2_len}
+                
+              #MatchGroups{r2_pos r2_len r2_g1_pos r2_g1_len r2_g2_pos r2_g2_len}:
+                // Matched with more groups, prioritize existing groups
+                ! next_pos = (+ curr_pos r2_len)
+                ! next_len = (+ curr_len r2_len)
+                #MatchGroups{pos next_len g1_pos g1_len g2_pos g2_len}
+                
+              #NoMatch:
+                // No more matches, return current count with groups
+                #MatchGroups{pos curr_len g1_pos g1_len g2_pos g2_len}
+            }
+        }
+      
+      // Start trying to match additional repetitions with groups
+      @match_up_to_n_with_groups(node, remaining, text, new_pos, r_len, r_g1_pos, r_g1_len, r_g2_pos, r_g2_len)
+      
+    #NoMatch:
+      // Failed to match minimum times
+      #NoMatch
+  }
+
+// Match a capturing group
+@match_group(node, text, pos) =
+  // Match the inner pattern
+  ! result = @match(node, text, pos)
+  
+  ~result {
+    #Match{r_pos r_len}:
+      // Matched without subgroups, capture this match
+      #MatchGroup{pos r_len pos r_len}
+      
+    #MatchGroup{r_pos r_len r_group_pos r_group_len}:
+      // Already has a group, promote to multiple groups
+      // First group is the entire match, second is the inner group
+      #MatchGroups{pos r_len pos r_len r_group_pos r_group_len}
+      
+    #MatchGroups{r_pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}:
+      // Already has multiple groups, we can't represent more than two groups
+      // Just return the existing groups for now (limitation of our representation)
+      #MatchGroups{pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}
+      
+    #NoMatch:
+      // No match for inner pattern
+      #NoMatch
+  }
+
+// Match positive lookahead assertion (?=...)
+@match_pos_lookahead(node, text, pos) =
+  // Match the assertion pattern without consuming input
+  ! result = @match(node, text, pos)
+  
+  ~result {
+    #Match{r_pos r_len}: #Match{pos 0}  // Assertion succeeded, return zero-width match
+    #MatchGroup{r_pos r_len r_group_pos r_group_len}: #Match{pos 0}  // Assertion succeeded with group
+    #MatchGroups{r_pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}: #Match{pos 0}  // Assertion succeeded with groups
+    #NoMatch: #NoMatch  // Assertion failed
+  }
+
+// Match negative lookahead assertion (?!...)
+@match_neg_lookahead(node, text, pos) =
+  // Match the assertion pattern without consuming input
+  ! result = @match(node, text, pos)
+  
+  ~result {
+    #Match{r_pos r_len}: #NoMatch  // Assertion succeeded, but we want it to fail
+    #MatchGroup{r_pos r_len r_group_pos r_group_len}: #NoMatch  // Assertion succeeded with group, but we want it to fail
+    #MatchGroups{r_pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}: #NoMatch  // Assertion succeeded with groups, but we want it to fail
+    #NoMatch: #Match{pos 0}  // Assertion failed, which is what we want for negative lookahead
+  }
+
+// Match positive lookbehind assertion (?<=...)
+@match_pos_lookbehind(node, text, pos) =
+  // Can't look behind at the start of the string
+  ~(== pos 0) {
+    1: #NoMatch  // At start of string, can't look behind
+    
+    0:
+      // Look behind by trying to match at the previous position
+      ! prev_pos = (- pos 1)
+      ! result = @match(node, text, prev_pos)
+      
+      ~result {
+        #Match{r_pos r_len}:
+          // Check if the match ends at our current position
+          ~(== (+ prev_pos r_len) pos) {
+            1: #Match{pos 0}  // Assertion succeeded, return zero-width match
+            0: #NoMatch       // Match doesn't end at our position
+          }
+          
+        #MatchGroup{r_pos r_len r_group_pos r_group_len}:
+          // Similar check for matches with groups
+          ~(== (+ prev_pos r_len) pos) {
+            1: #Match{pos 0}  // Assertion succeeded, return zero-width match
+            0: #NoMatch       // Match doesn't end at our position
+          }
+          
+        #MatchGroups{r_pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}:
+          // Similar check for matches with multiple groups
+          ~(== (+ prev_pos r_len) pos) {
+            1: #Match{pos 0}  // Assertion succeeded, return zero-width match
+            0: #NoMatch       // Match doesn't end at our position
+          }
+          
+        #NoMatch: #NoMatch  // Assertion failed
+      }
+  }
+
+// Match negative lookbehind assertion (?<!...)
+@match_neg_lookbehind(node, text, pos) =
+  // At start of string, nothing to look behind, so assertion succeeds
+  ~(== pos 0) {
+    1: #Match{pos 0}  // At start of string, no match behind us
+    
+    0:
+      // Look behind by trying to match at the previous position
+      ! prev_pos = (- pos 1)
+      ! result = @match(node, text, prev_pos)
+      
+      ~result {
+        #Match{r_pos r_len}:
+          // Check if the match ends at our current position
+          ~(== (+ prev_pos r_len) pos) {
+            1: #NoMatch       // Assertion matched, but we want it to fail
+            0: #Match{pos 0}  // Match doesn't end at our position, so assertion succeeds
+          }
+          
+        #MatchGroup{r_pos r_len r_group_pos r_group_len}:
+          // Similar check for matches with groups
+          ~(== (+ prev_pos r_len) pos) {
+            1: #NoMatch       // Assertion matched, but we want it to fail
+            0: #Match{pos 0}  // Match doesn't end at our position, so assertion succeeds
+          }
+          
+        #MatchGroups{r_pos r_len r_g1_pos r_g1_len r_g2_pos r_g2_len}:
+          // Similar check for matches with multiple groups
+          ~(== (+ prev_pos r_len) pos) {
+            1: #NoMatch       // Assertion matched, but we want it to fail
+            0: #Match{pos 0}  // Match doesn't end at our position, so assertion succeeds
+          }
+          
+        #NoMatch: #Match{pos 0}  // Assertion failed, which is what we want for negative lookbehind
+      }
+  }
+
+// Main pattern matcher dispatcher
+@match(pattern, text, pos) = ~pattern {
+  #Literal{str}: @match_literal(str, text, pos)
+  #Char{c}: @match_char(c, text, pos)
+  #Any: @match_any(text, pos)
+  #Concat{a b}: @match_concat(a, b, text, pos)
+  #Alt{a b}: @match_alt(a, b, text, pos)
+  #Star{node}: @match_star(node, text, pos)
+  #Plus{node}: @match_plus(node, text, pos)
+  #Optional{node}: @match_optional(node, text, pos)
+  #Repeat{node n}: @match_repeat(node, n, text, pos)
+  #RepeatRange{node min max}: @match_repeat_range(node, min, max, text, pos)
+  #CharClass{chars}: @match_char_class(chars, text, pos)
+  #NegCharClass{chars}: @match_neg_char_class(chars, text, pos)
+  #Group{node}: @match_group(node, text, pos)
+  #AnchorStart: @match_anchor_start(pos)
+  #AnchorEnd: @match_anchor_end(text, pos)
+  #WordBoundary: @match_word_boundary(text, pos)
+  #NonWordBoundary: @match_non_word_boundary(text, pos)
+  #PosLookahead{node}: @match_pos_lookahead(node, text, pos)
+  #NegLookahead{node}: @match_neg_lookahead(node, text, pos)
+  #PosLookbehind{node}: @match_pos_lookbehind(node, text, pos)
+  #NegLookbehind{node}: @match_neg_lookbehind(node, text, pos)
+}
+
+// Example regex patterns for testing
+@get_pattern = #Literal{"GET"}
+@char_a_pattern = #Char{"a"}
+@char_b_pattern = #Char{"b"}
+@any_pattern = #Any
+@concat_pattern = #Concat{#Char{"a"} #Char{"b"}}
+@alt_pattern = #Alt{#Char{"a"} #Char{"b"}}
+@star_pattern = #Star{#Char{"a"}}
+@plus_pattern = #Plus{#Char{"a"}}
+@optional_pattern = #Optional{#Char{"a"}}
+@repeat_pattern = #Repeat{#Char{"a"} 3}  // a{3}
+@repeat_range_pattern = #RepeatRange{#Char{"a"} 1 3}  // a{1,3}
+@char_class_pattern = #CharClass{"abc"}  // [abc]
+@neg_char_class_pattern = #NegCharClass{"abc"}  // [^abc]
+@group_pattern = #Group{#Char{"a"}}  // (a)
+@anchor_start_pattern = #AnchorStart  // ^
+@anchor_end_pattern = #AnchorEnd  // $
+@word_boundary_pattern = #WordBoundary  // \b
+@non_word_boundary_pattern = #NonWordBoundary  // \B
+@pos_lookahead_pattern = #Concat{#Char{"a"} #PosLookahead{#Char{"b"}}}  // a(?=b)
+@neg_lookahead_pattern = #Concat{#Char{"a"} #NegLookahead{#Char{"b"}}}  // a(?!b)
+@pos_lookbehind_pattern = #Concat{#PosLookbehind{#Char{"a"}} #Char{"b"}}  // (?<=a)b
+@neg_lookbehind_pattern = #Concat{#NegLookbehind{#Char{"a"}} #Char{"b"}}  // (?<!a)b
+
+// Main function for testing
+@main =
+  // Create test patterns
+  ! test_patterns = [
+    @get_pattern,
+    @char_a_pattern,
+    @char_b_pattern,
+    @any_pattern,
+    @concat_pattern,
+    @alt_pattern,
+    @star_pattern,
+    @plus_pattern,
+    @optional_pattern,
+    @repeat_pattern,
+    @repeat_range_pattern,
+    @char_class_pattern,
+    @neg_char_class_pattern,
+    @group_pattern,
+    @anchor_start_pattern,
+    @anchor_end_pattern,
+    @word_boundary_pattern,
+    @non_word_boundary_pattern,
+    @pos_lookahead_pattern,
+    @neg_lookahead_pattern,
+    @pos_lookbehind_pattern,
+    @neg_lookbehind_pattern
+  ]
+  
+  // Choose a specific pattern to test
+  ! test_pattern = @concat_pattern
+  ! test_text = "abc"
+  ! test_pos = 0
+  
+  // Run the match
+  ! result = @match(test_pattern, test_text, test_pos)
+  
+  // Return the result
+  result

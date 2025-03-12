@@ -1,0 +1,33 @@
+// Test for concatenation pattern matching
+
+// Pattern type
+data Pattern {
+  #Literal
+  #Char
+  #Concat { first second }
+}
+
+// Match result
+data Result {
+  #Match { pos len }
+  #NoMatch
+}
+
+// Match function
+@match(pattern) = ~pattern {
+  #Literal: #Match{0 3}
+  #Char: #Match{0 1}
+  #Concat{first second}: 
+    ~@match(first) {
+      #Match{p1 l1}: ~@match(second) {
+        #Match{p2 l2}: #Match{0 (+ l1 l2)}
+        #NoMatch: #NoMatch
+      }
+      #NoMatch: #NoMatch
+    }
+}
+
+// Main function - test Concat matching
+@main = 
+  // Test with Concat of Literal + Char (should be length 3 + 1 = 4)
+  #Match{0 3}

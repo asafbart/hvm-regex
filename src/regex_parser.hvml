@@ -1,0 +1,395 @@
+// Simple Regex Parser in HVM
+// Provides basic regex pattern parsing and matching
+
+// AST Node Types
+data Node {
+  #Literal { c }       // Single character literal
+  #Concat { a b }      // Concatenation of two patterns
+  #Alt { a b }         // Alternation (a|b)
+  #Star { a }          // Zero or more repetitions (a*)
+  #Plus { a }          // One or more repetitions (a+)
+  #Optional { a }      // Zero or one occurrence (a?)
+  #Any                 // Any character (.)
+  #Empty               // Empty string
+  #CharClass { chars neg } // Character class ([abc] or [^abc])
+}
+
+// Match Result Type
+data MatchResult {
+  #Match { pos len }   // Position and length of match
+  #NoMatch             // No match found
+}
+
+// === Parsing Helper Functions ===
+
+// Check if character is end of string
+@is_eos(str, pos) = (>= pos (len str))
+
+// Get character at position
+@char_at(str, pos) = (substr str pos 1)
+
+// Check if character is a special metacharacter
+@is_meta(c) = 
+  (| (== c "*") (| (== c "+") (| (== c "?") (| (== c "|") (| (== c "(") (| (== c ")" (| (== c "[") (| (== c "]") (== c ".")))))))))
+
+// === Parser Functions ===
+
+// Parse a regex pattern
+@parse(pattern) = 
+  ! result = @parse_alt(pattern, 0)
+  result.0  // Return only the node part of the result tuple
+
+// Parse alternation (a|b)
+@parse_alt(pattern, pos) =
+  // First parse a sequence
+  ! seq_result = @parse_seq(pattern, pos)
+  ! node = seq_result.0
+  ! next_pos = seq_result.1
+  
+  // Check if there's an alternation operator
+  ~(& (! @is_eos(pattern, next_pos)) (== (@char_at pattern next_pos) "|")) {
+    1:
+      // Parse the right side after '|'
+      ! right_result = @parse_alt(pattern, (+ next_pos 1))
+      ! right_node = right_result.0
+      ! right_pos = right_result.1
+      
+      // Return alternation node
+      {#Alt{node right_node}, right_pos}
+    
+    0: {node, next_pos}  // No alternation, return the sequence
+  }
+
+// Parse sequence of expressions (concatenation)
+@parse_seq(pattern, pos) =
+  // First parse a single term
+  ! term_result = @parse_term(pattern, pos)
+  ! node = term_result.0
+  ! next_pos = term_result.1
+  
+  // Check if we've reached the end or a special character
+  ~(| (@is_eos pattern next_pos) 
+      (| (== (@char_at pattern next_pos) "|") 
+         (== (@char_at pattern next_pos) ")"))) {
+    1: {node, next_pos}  // End of sequence
+    
+    0:
+      // Parse the next term and combine with concatenation
+      ! next_result = @parse_seq(pattern, next_pos)
+      ! next_node = next_result.0
+      ! end_pos = next_result.1
+      
+      // Return concatenation node
+      {#Concat{node next_node}, end_pos}
+  }
+
+// Parse a single term with optional modifier (*+?)
+@parse_term(pattern, pos) =
+  ~(@is_eos pattern pos) {
+    1: {#Empty, pos}  // Empty pattern
+    
+    0:
+      // Get the current character
+      ! c = (@char_at pattern pos)
+      
+      // Handle special characters
+      ~(== c "(") {
+        // Parse a group
+        1: @parse_group(pattern, pos)
+        
+        0: ~(== c "[") {
+          // Parse a character class
+          1: @parse_char_class(pattern, pos)
+          
+          0: ~(== c ".") {
+            // Parse a dot (any character)
+            1: {#Any, (+ pos 1)}
+            
+            0: ~(== c "|") {
+              // Alternation operator handled in parse_alt
+              1: {#Empty, pos}
+              
+              0: ~(== c ")") {
+                // Closing paren handled in parse_group
+                1: {#Empty, pos}
+                
+                0:
+                  // Regular character, check for modifiers
+                  ! factor_pos = (+ pos 1)
+                  ! factor = #Literal{c}
+                  
+                  ~(@is_eos pattern factor_pos) {
+                    1: {factor, factor_pos}  // End of pattern, no modifier
+                    
+                    0:
+                      // Check for modifiers (*+?)
+                      ! mod = (@char_at pattern factor_pos)
+                      
+                      ~(== mod "*") {
+                        // Star modifier
+                        1: {#Star{factor}, (+ factor_pos 1)}
+                        
+                        0: ~(== mod "+") {
+                          // Plus modifier
+                          1: {#Plus{factor}, (+ factor_pos 1)}
+                          
+                          0: ~(== mod "?") {
+                            // Optional modifier
+                            1: {#Optional{factor}, (+ factor_pos 1)}
+                            
+                            0: {factor, factor_pos}  // No modifier
+                          }
+                        }
+                      }
+                  }
+              }
+            }
+          }
+        }
+      }
+  }
+
+// Parse a group (expression in parentheses)
+@parse_group(pattern, pos) =
+  // Skip the opening parenthesis
+  ! inner_pos = (+ pos 1)
+  
+  // Parse the inner pattern (using alternation, which is the top-level operation)
+  ! inner_result = @parse_alt(pattern, inner_pos)
+  ! inner_node = inner_result.0
+  ! after_inner_pos = inner_result.1
+  
+  // Check for closing parenthesis
+  ~(& (! @is_eos(pattern, after_inner_pos)) 
+       (== (@char_at pattern after_inner_pos) ")")) {
+    1: {inner_node, (+ after_inner_pos 1)}  // Skip the closing paren
+    0: {#Empty, pos}  // Missing closing paren, return empty node
+  }
+
+// Parse a character class
+@parse_char_class(pattern, pos) =
+  // Skip the opening bracket
+  ! content_pos = (+ pos 1)
+  
+  // Check if it's a negated class
+  ! is_negated = ~(& (! @is_eos(pattern, content_pos)) 
+                     (== (@char_at pattern content_pos) "^")) {
+    1: 
+      // Skip the caret
+      ! chars_pos = (+ content_pos 1)
+      {pos: chars_pos, negated: 1}
+    0: {pos: content_pos, negated: 0}
+  }
+  
+  // Collect the characters in the class
+  ! chars_result = @collect_chars(pattern, is_negated.pos, [])
+  
+  // Return character class node
+  {#CharClass{chars_result.0 is_negated.negated}, chars_result.1}
+
+// Collect characters in a character class
+@collect_chars(pattern, pos, chars) =
+  ~(@is_eos pattern pos) {
+    1: {chars, pos}  // Unexpected end of pattern
+    
+    0:
+      ! c = (@char_at pattern pos)
+      
+      ~(== c "]") {
+        1: {chars, (+ pos 1)}  // End of character class
+        
+        0:
+          // Add this character to the set and continue
+          ! new_chars = (+ chars [c])
+          @collect_chars(pattern, (+ pos 1), new_chars)
+      }
+  }
+
+// === Matching Functions ===
+
+// Main match function that matches a parsed pattern against text
+@match(node, text, pos) = ~node {
+  #Empty: #Match{pos 0}  // Empty pattern matches zero-width
+  
+  #Literal{c}:
+    // Match a single literal character
+    ~(& (< pos (len text)) (== c (@char_at text pos))) {
+      1: #Match{pos 1}  // Character matches
+      0: #NoMatch       // No match
+    }
+  
+  #Concat{a b}:
+    // Match two patterns in sequence
+    ! result_a = @match(a, text, pos)
+    
+    ~result_a {
+      #Match{match_pos match_len}:
+        // If first part matches, try to match second part
+        ! result_b = @match(b, text, (+ pos match_len))
+        
+        ~result_b {
+          #Match{b_pos b_len}:
+            // Both parts match, return combined length
+            #Match{pos (+ match_len b_len)}
+          
+          #NoMatch: #NoMatch
+        }
+      
+      #NoMatch: #NoMatch
+    }
+  
+  #Alt{a b}:
+    // Try to match either of two alternatives
+    ! result_a = @match(a, text, pos)
+    
+    ~result_a {
+      #Match{match_pos match_len}:
+        // First alternative matches
+        #Match{pos match_len}
+      
+      #NoMatch:
+        // Try second alternative
+        ! result_b = @match(b, text, pos)
+        
+        ~result_b {
+          #Match{b_pos b_len}:
+            #Match{pos b_len}
+          
+          #NoMatch: #NoMatch
+        }
+    }
+  
+  #Star{a}:
+    // Match zero or more occurrences
+    @match_star(a, text, pos, 0)
+  
+  #Plus{a}:
+    // Match one or more occurrences
+    ! result = @match(a, text, pos)
+    
+    ~result {
+      #Match{match_pos match_len}:
+        // First match succeeded, try to match more
+        ! star_result = @match_star(a, text, (+ pos match_len), match_len)
+        
+        ~star_result {
+          #Match{star_pos star_len}:
+            #Match{pos star_len}
+          
+          #NoMatch: result  // Return just the first match
+        }
+      
+      #NoMatch: #NoMatch
+    }
+  
+  #Optional{a}:
+    // Match zero or one occurrence
+    ! result = @match(a, text, pos)
+    
+    ~result {
+      #Match{match_pos match_len}:
+        // Pattern matches
+        #Match{pos match_len}
+      
+      #NoMatch:
+        // No match, but that's OK for optional
+        #Match{pos 0}
+    }
+  
+  #Any:
+    // Match any single character
+    ~(< pos (len text)) {
+      1: #Match{pos 1}  // Any character matches
+      0: #NoMatch       // End of string
+    }
+  
+  #CharClass{chars neg}:
+    // Match a character class
+    ~(< pos (len text)) {
+      1:
+        ! c = (@char_at text pos)
+        ! in_class = @char_in_class(c, chars)
+        
+        ~(& (== neg 0) in_class) {
+          1: #Match{pos 1}  // Character in non-negated class
+          0: 
+            ~(& (== neg 1) (! in_class)) {
+              1: #Match{pos 1}  // Character not in negated class
+              0: #NoMatch       // No match
+            }
+        }
+      
+      0: #NoMatch  // End of string
+    }
+}
+
+// Match star (zero or more repetitions)
+@match_star(node, text, pos, total_len) =
+  ! result = @match(node, text, pos)
+  
+  ~result {
+    #Match{match_pos match_len}:
+      ~(== match_len 0) {
+        1: #Match{pos total_len}  // Zero-width match, stop to avoid infinite loop
+        0:
+          // Try to match more occurrences
+          ! next_pos = (+ pos match_len)
+          ! new_total = (+ total_len match_len)
+          
+          ~(< next_pos (len text)) {
+            1: @match_star(node, text, next_pos, new_total)
+            0: #Match{pos new_total}  // End of string
+          }
+      }
+    
+    #NoMatch: #Match{pos total_len}  // No more matches, return what we have
+  }
+
+// Check if a character is in a character class
+@char_in_class(c, chars) =
+  @char_in_class_iter(c, chars, 0)
+
+// Iterator for char_in_class
+@char_in_class_iter(c, chars, i) =
+  ~(< i (len chars)) {
+    1:
+      ! curr = (get chars i)
+      ~(== c curr) {
+        1: 1  // Character found
+        0: @char_in_class_iter(c, chars, (+ i 1))  // Keep looking
+      }
+    0: 0  // Not found
+  }
+
+// === Main regex matcher function ===
+
+// Parse a pattern and match it against text
+@match_regex(pattern, text, start_pos) =
+  // First parse the pattern
+  ! ast = @parse(pattern)
+  
+  // Then match against the text
+  ! result = @match(ast, text, start_pos)
+  
+  ~result {
+    #Match{pos len}:
+      // Return the matched text
+      ! matched = (substr text pos len)
+      {matched, pos, len}
+    
+    #NoMatch: {"", -1, 0}  // No match
+  }
+
+// === Entry point for testing ===
+@main =
+  // Test pattern
+  ! pattern = "a(b|c)*d"
+  ! text = "abcbcd"
+  
+  // Parse and match
+  ! result = @match_regex(pattern, text, 0)
+  
+  ~(== result.1 -1) {
+    1: "No match"
+    0: (+ "Matched: " result.0)
+  }

@@ -1,0 +1,518 @@
+// Optimized Regex Engine using NFA/DFA Approach
+// Based on Thompson's algorithm for efficient regex matching
+
+// === NFA State Types ===
+data State {
+  #Char { c next_id }               // Match specific character
+  #Split { alt1_id alt2_id }        // Split (fork execution to two states)
+  #Match                            // Final accepting state
+  #CharClass { chars next_id }      // Match any character in set
+  #NegCharClass { chars next_id }   // Match any character not in set
+  #Any { next_id }                  // Match any character (.)
+  #Epsilon { next_id }              // Epsilon transition (no input consumed)
+}
+
+// === NFA Type ===
+data NFA {
+  #Machine { start_id states }     // NFA with start state and state list
+}
+
+// === Pattern AST Types ===
+data Pattern {
+  #Char { c }                       // Single character
+  #Concat { a b }                   // Concatenation of two patterns
+  #Alt { a b }                      // Alternation (a|b)
+  #Star { a }                       // Zero or more repetitions (a*)
+  #Plus { a }                       // One or more repetitions (a+)
+  #Optional { a }                   // Zero or one repetition (a?)
+  #Any                              // Any character (.)
+  #CharClass { chars }              // Character class ([abc])
+  #NegCharClass { chars }           // Negated character class ([^abc])
+  #Group { a }                      // Capturing group ((a))
+}
+
+// === Matching Result Types ===
+data Result {
+  #Match { pos len }                // Match at position pos with length len
+  #NoMatch                          // No match
+}
+
+// === State Set for Subset Construction ===
+data StateSet {
+  #Empty
+  #Set { id next }                 // Set of state IDs
+}
+
+// === Helper functions ===
+
+// Create a new state
+@new_state(state, states) =
+  // Get the next ID
+  ! id = (len states)
+  // Add the state to the list
+  ! new_states = (+ states [state])
+  // Return the ID and the updated state list
+  {id, new_states}
+
+// Check if a state ID is in a state set
+@state_in_set(id, set) = ~set {
+  #Empty: 0
+  #Set{set_id next}:
+    ~(== id set_id) {
+      1: 1  // Found it
+      0: @state_in_set(id, next)  // Keep looking
+    }
+}
+
+// Add a state ID to a state set if not already present
+@add_to_set(id, set) =
+  // Check if the state is already in the set
+  ~(@state_in_set(id, set)) {
+    1: set  // Already there, return unchanged
+    0: #Set{id set}  // Add it
+  }
+
+// Add epsilon closure of state to set (all states reachable by epsilon transitions)
+@add_epsilon_closure(state_id, states, set) =
+  // Skip if already in the set
+  ~(@state_in_set(state_id, set)) {
+    1: set  // State already processed
+    0:
+      // Add the current state to the set
+      ! new_set = @add_to_set(state_id, set)
+      
+      // Get the current state
+      ! state = (get states state_id)
+      
+      // Process based on state type
+      ~state {
+        // For epsilon transitions, follow and add closure
+        #Epsilon{next_id}:
+          @add_epsilon_closure(next_id, states, new_set)
+        
+        // For split states, follow both branches
+        #Split{alt1_id alt2_id}:
+          ! set1 = @add_epsilon_closure(alt1_id, states, new_set)
+          @add_epsilon_closure(alt2_id, states, set1)
+        
+        // For other states, just return the set
+        _: new_set
+      }
+  }
+
+// === Pattern to NFA conversion ===
+
+// Convert pattern to NFA using Thompson's construction
+@pattern_to_nfa(pattern) =
+  // Start with empty state list
+  ! states = []
+  
+  // Convert pattern to NFA fragment and add a match state
+  ! result = @pattern_to_fragment(pattern, states)
+  ! frag_start = result.0
+  ! states = result.1
+  
+  // Create the final match state
+  ! match_result = @new_state(#Match, states)
+  ! match_id = match_result.0
+  ! states = match_result.1
+  
+  // Connect the fragment to the match state
+  ! patched_states = @patch(frag_start, match_id, states)
+  
+  // Return the NFA
+  #Machine{frag_start patched_states}
+
+// === Pattern to NFA Fragment ===
+
+// Convert a pattern to an NFA fragment (start state ID and states list)
+@pattern_to_fragment(pattern, states) = ~pattern {
+  // Single character
+  #Char{c}:
+    ! char_state = #Char{c -1}  // -1 is a placeholder for "out" state
+    @new_state(char_state, states)
+  
+  // Concatenation
+  #Concat{a b}:
+    // Convert first pattern
+    ! a_result = @pattern_to_fragment(a, states)
+    ! a_start = a_result.0
+    ! states = a_result.1
+    
+    // Convert second pattern
+    ! b_result = @pattern_to_fragment(b, states)
+    ! b_start = b_result.0
+    ! states = b_result.1
+    
+    // Connect a's out state to b's start state
+    ! patched_states = @patch(a_start, b_start, states)
+    
+    // Return a's start state and the patched states
+    {a_start, patched_states}
+  
+  // Alternation
+  #Alt{a b}:
+    // Convert both patterns
+    ! a_result = @pattern_to_fragment(a, states)
+    ! a_start = a_result.0
+    ! states = a_result.1
+    
+    ! b_result = @pattern_to_fragment(b, states)
+    ! b_start = b_result.0
+    ! states = b_result.1
+    
+    // Create a split state that branches to a and b
+    ! split_state = #Split{a_start b_start}
+    ! split_result = @new_state(split_state, states)
+    
+    // Return the split state ID and updated states
+    {split_result.0, split_result.1}
+  
+  // Zero or more repetitions
+  #Star{a}:
+    // Convert the pattern
+    ! a_result = @pattern_to_fragment(a, states)
+    ! a_start = a_result.0
+    ! states = a_result.1
+    
+    // Create a split state for the loop
+    ! split_state = #Split{a_start -1}  // Branch to pattern or out
+    ! split_result = @new_state(split_state, states)
+    ! split_id = split_result.0
+    ! states = split_result.1
+    
+    // Connect a's out state back to the split state
+    ! patched_states = @patch(a_start, split_id, states)
+    
+    // Return the split state ID and updated states
+    {split_id, patched_states}
+  
+  // One or more repetitions
+  #Plus{a}:
+    // Convert the pattern
+    ! a_result = @pattern_to_fragment(a, states)
+    ! a_start = a_result.0
+    ! states = a_result.1
+    
+    // Create a split state for the loop
+    ! split_state = #Split{a_start -1}  // Branch to pattern or out
+    ! split_result = @new_state(split_state, states)
+    ! split_id = split_result.0
+    ! states = split_result.1
+    
+    // Connect a's out state to the split state
+    ! patched_states = @patch(a_start, split_id, states)
+    
+    // Return a's start state and updated states
+    {a_start, patched_states}
+  
+  // Zero or one occurrence
+  #Optional{a}:
+    // Convert the pattern
+    ! a_result = @pattern_to_fragment(a, states)
+    ! a_start = a_result.0
+    ! states = a_result.1
+    
+    // Create a split state for the option
+    ! split_state = #Split{a_start -1}  // Branch to pattern or skip
+    ! split_result = @new_state(split_state, states)
+    
+    // Return the split state ID and updated states
+    {split_result.0, split_result.1}
+  
+  // Any character
+  #Any:
+    ! any_state = #Any{-1}  // Match any character
+    @new_state(any_state, states)
+  
+  // Character class
+  #CharClass{chars}:
+    ! class_state = #CharClass{chars -1}
+    @new_state(class_state, states)
+  
+  // Negated character class
+  #NegCharClass{chars}:
+    ! neg_class_state = #NegCharClass{chars -1}
+    @new_state(neg_class_state, states)
+  
+  // Capturing group
+  #Group{a}:
+    // Just convert the inner pattern (we don't capture in this implementation)
+    @pattern_to_fragment(a, states)
+}
+
+// === Patch outgoing transitions ===
+
+// Patch all unpatched transitions in a state to go to a target state
+@patch(state_id, target_id, states) =
+  // Get the current state
+  ! state = (get states state_id)
+  
+  // Determine how to patch based on state type
+  ~state {
+    #Char{c next_id}:
+      ~(== next_id -1) {
+        // Outgoing transition needs patching
+        1:
+          // Create patched state
+          ! patched_state = #Char{c target_id}
+          // Update state in the list
+          @update_state(state_id, patched_state, states)
+        
+        // Outgoing transition already patched, continue recursively
+        0:
+          @patch(next_id, target_id, states)
+      }
+    
+    #Epsilon{next_id}:
+      ~(== next_id -1) {
+        1:
+          ! patched_state = #Epsilon{target_id}
+          @update_state(state_id, patched_state, states)
+        0:
+          @patch(next_id, target_id, states)
+      }
+    
+    #Any{next_id}:
+      ~(== next_id -1) {
+        1:
+          ! patched_state = #Any{target_id}
+          @update_state(state_id, patched_state, states)
+        0:
+          @patch(next_id, target_id, states)
+      }
+    
+    #CharClass{chars next_id}:
+      ~(== next_id -1) {
+        1:
+          ! patched_state = #CharClass{chars target_id}
+          @update_state(state_id, patched_state, states)
+        0:
+          @patch(next_id, target_id, states)
+      }
+    
+    #NegCharClass{chars next_id}:
+      ~(== next_id -1) {
+        1:
+          ! patched_state = #NegCharClass{chars target_id}
+          @update_state(state_id, patched_state, states)
+        0:
+          @patch(next_id, target_id, states)
+      }
+    
+    #Split{alt1_id alt2_id}:
+      ! states1 = ~(== alt1_id -1) {
+        1: @update_state(state_id, #Split{target_id alt2_id}, states)
+        0: states
+      }
+      
+      ! states2 = ~(== alt2_id -1) {
+        1: @update_state(state_id, #Split{alt1_id target_id}, states1)
+        0: states1
+      }
+      
+      // Recursively patch non-placeholder transitions
+      ! states3 = ~(!= alt1_id -1) {
+        1: @patch(alt1_id, target_id, states2)
+        0: states2
+      }
+      
+      ~(!= alt2_id -1) {
+        1: @patch(alt2_id, target_id, states3)
+        0: states3
+      }
+    
+    // Match state has no outgoing transitions
+    #Match: states
+  }
+
+// Update a state in the state list
+@update_state(id, new_state, states) =
+  @update_state_helper(id, new_state, states, 0, [])
+
+// Helper function to update a state at index id
+@update_state_helper(id, new_state, states, current_idx, result) =
+  ~(== current_idx (len states)) {
+    // We've processed all states
+    1: result
+    
+    // Process the current state
+    0:
+      // Get the current state
+      ! state = (get states current_idx)
+      
+      // Check if this is the state to update
+      ! updated_result = ~(== current_idx id) {
+        1: (+ result [new_state])  // Replace with the new state
+        0: (+ result [state])      // Keep the original state
+      }
+      
+      // Process the next state
+      @update_state_helper(id, new_state, states, (+ current_idx 1), updated_result)
+  }
+
+// === NFA simulation functions ===
+
+// Match a pattern against text using NFA simulation
+@match_nfa(nfa, text, pos) = ~nfa {
+  #Machine{start_id states}:
+    // Compute the initial epsilon closure
+    ! initial_set = #Empty
+    ! current_set = @add_epsilon_closure(start_id, states, initial_set)
+    
+    // Simulate the NFA
+    ! result = @simulate_nfa(current_set, states, text, pos, 0)
+    
+    ~result {
+      1: #Match{pos result}  // Matched with length 'result'
+      0: #NoMatch           // No match
+    }
+}
+
+// Simulate NFA execution on the input text
+@simulate_nfa(current_set, states, text, pos, len) =
+  // Check if current set contains a match state
+  ~(@has_match_state(current_set, states)) {
+    1: len  // We've found a match
+    
+    // Check if we've reached end of string
+    0: ~(>= (+ pos len) (len text)) {
+      1: 0  // End of string, no match
+      
+      // Process the next character
+      0:
+        // Get the current character
+        ! c = (substr text (+ pos len) 1)
+        
+        // Compute the next set of states after input c
+        ! next_set = @move(current_set, states, c, #Empty)
+        
+        // Compute epsilon closure of next set
+        ! closure = @closure(next_set, states, #Empty)
+        
+        // Continue simulation with the new set
+        ~(== closure #Empty) {
+          1: 0  // No valid transitions, no match
+          0: @simulate_nfa(closure, states, text, pos, (+ len 1))  // Continue
+        }
+    }
+  }
+
+// Check if a set contains a match state
+@has_match_state(set, states) = ~set {
+  #Empty: 0
+  #Set{id next}:
+    // Get the state
+    ! state = (get states id)
+    
+    // Check if it's a match state
+    ~state {
+      #Match: 1  // Found a match state
+      _: @has_match_state(next, states)  // Check the rest of the set
+    }
+}
+
+// Compute the set of states reachable after input c
+@move(set, states, c, result) = ~set {
+  #Empty: result
+  #Set{id next}:
+    // Get the current state
+    ! state = (get states id)
+    
+    // Check if this state can transition on c
+    ! new_result = ~state {
+      #Char{state_c next_id}:
+        ~(== state_c c) {
+          1: @add_to_set(next_id, result)  // Character matches
+          0: result                        // No match
+        }
+      
+      #Any{next_id}: @add_to_set(next_id, result)  // Any character matches
+      
+      #CharClass{chars next_id}:
+        ~(@char_in_class(c, chars)) {
+          1: @add_to_set(next_id, result)  // Character in class
+          0: result                        // Not in class
+        }
+      
+      #NegCharClass{chars next_id}:
+        ~(@char_in_class(c, chars)) {
+          1: result                        // Character in class, negated
+          0: @add_to_set(next_id, result)  // Not in class, accepted
+        }
+      
+      // Other state types don't transition on input
+      _: result
+    }
+    
+    // Process the rest of the set
+    @move(next, states, c, new_result)
+}
+
+// Compute epsilon closure of a set
+@closure(set, states, result) = ~set {
+  #Empty: result
+  #Set{id next}:
+    // Add epsilon closure of this state
+    ! new_result = @add_epsilon_closure(id, states, result)
+    
+    // Process the rest of the set
+    @closure(next, states, new_result)
+}
+
+// Check if a character is in a character class
+@char_in_class(c, chars) =
+  @char_in_class_iter(c, chars, 0)
+
+// Helper for char_in_class
+@char_in_class_iter(c, chars, idx) =
+  ~(< idx (len chars)) {
+    1:
+      ! curr = (get chars idx)
+      ~(== c curr) {
+        1: 1  // Character found
+        0: @char_in_class_iter(c, chars, (+ idx 1))  // Keep looking
+      }
+    0: 0  // Not found
+  }
+
+// === Regex pattern parsing ===
+
+// This section is simplified. In a complete implementation, you'd include
+// or import a proper regex parser like the one in regex_parser.hvml.
+
+// Convert a regex string to a pattern AST
+@parse_regex(regex) =
+  // Placeholder: in a real implementation, this would parse the regex string
+  // For now, we'll just return a hardcoded pattern for demonstration.
+  #Concat{#Char{"a"} #Star{#Alt{#Char{"b"} #Char{"c"}}}}  // a(b|c)*
+
+// === Main regex matching function ===
+
+// Match a regex pattern against text
+@match_regex(pattern, text, pos) =
+  // Convert the regex to an NFA
+  ! nfa = @pattern_to_nfa(pattern)
+  
+  // Simulate the NFA to find a match
+  @match_nfa(nfa, text, pos)
+
+// Full regex matching function (parse and match)
+@match_full(regex, text, pos) =
+  // Parse the regex pattern
+  ! pattern = @parse_regex(regex)
+  
+  // Match using the pattern
+  @match_regex(pattern, text, pos)
+
+// === Test function ===
+@main =
+  // Test pattern: a(b|c)*
+  ! pattern = #Concat{#Char{"a"} #Star{#Alt{#Char{"b"} #Char{"c"}}}}
+  ! text = "abcbcd"
+  ! result = @match_regex(pattern, text, 0)
+  
+  ~result {
+    #Match{pos len}: (+ "Matched at position " (+ (int_to_string pos) (+ " with length " (int_to_string len))))
+    #NoMatch: "No match"
+  }

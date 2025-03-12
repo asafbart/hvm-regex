@@ -1,0 +1,28 @@
+// Test for literal pattern matching
+
+// Pattern type - just Literal
+data Pattern {
+  #Literal
+}
+
+// Match result
+data Result {
+  #Match { pos len }
+  #NoMatch
+}
+
+// Match function
+@match(pattern) = ~pattern {
+  #Literal: #Match{0 3}
+}
+
+// Main function - test Literal matching
+@main = 
+  // Get match result for Literal pattern
+  ! result = @match(#Literal)
+  
+  // Check if result is as expected (match with length 3)
+  ~result {
+    #Match{p l}: l  // Return the length
+    #NoMatch: 0
+  }

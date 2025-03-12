@@ -1,0 +1,154 @@
+// Snort Rule Pattern Implementation for HVM Multi-Pattern Matcher
+// Demonstrates how to use HVM for efficient IDS/IPS pattern matching
+
+// Include the main multi-pattern matcher implementation
+@include "multi_pattern_impl.hvml"
+
+// Collection of patterns extracted from Snort rules
+@snort_patterns = [
+  // Web protocol patterns
+  {id: 100, text: "GET", type: "literal"},
+  {id: 101, text: "POST", type: "literal"},
+  {id: 102, text: "USER anonymous", type: "literal", description: "Anonymous FTP login attempt"},
+  
+  // SQL injection patterns
+  {id: 200, text: "SELECT", type: "literal", description: "Potential SQL injection"},
+  {id: 201, text: "UNION SELECT", type: "literal", description: "SQL injection with UNION"},
+  {id: 202, text: "' OR 1=1--", type: "literal", description: "SQL injection with OR condition"},
+  {id: 203, text: ".*(?i)(?:union\\s+(?:all\\s+)?select).*", type: "regex", description: "Complex SQL UNION injection"},
+  {id: 204, text: ".*(?i)(?:' OR \\d+=\\d+--).*", type: "regex", description: "Complex SQL OR injection"},
+  
+  // Cross-site scripting patterns
+  {id: 300, text: "<script>", type: "literal", description: "Basic XSS attempt"},
+  {id: 301, text: "</script>", type: "literal", description: "Basic XSS attempt"},
+  {id: 302, text: ".*(?i)(?:<script[^>]*>[^<]*<\\/script>).*", type: "regex", description: "Complex XSS detection"},
+  
+  // Path traversal patterns
+  {id: 400, text: "../", type: "literal", description: "Directory traversal attempt"},
+  {id: 401, text: "..\\", type: "literal", description: "Windows directory traversal attempt"},
+  {id: 402, text: ".*(?:\\.\\.\\/|\\.\\.\\\\\\.\\\\|\\.\\.\%2f|\\.\\.\%5c).*", type: "regex", description: "Complex directory traversal"},
+  
+  // Command injection patterns
+  {id: 500, text: "exec(", type: "literal", description: "PHP command execution attempt"},
+  {id: 501, text: "system(", type: "literal", description: "PHP system call attempt"},
+  {id: 502, text: ".*(?i)(?:exec|system|passthru|shell_exec|popen).*", type: "regex", description: "PHP command execution functions"},
+  
+  // Credit card patterns
+  {id: 600, text: ".*\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\\b.*", type: "regex", description: "Credit card number detection"},
+  
+  // Protocol abuse patterns
+  {id: 700, text: "MAIL FROM:<", type: "literal", description: "SMTP mail sender"},
+  {id: 701, text: "RCPT TO:<", type: "literal", description: "SMTP mail recipient"},
+  {id: 702, text: ".*([A-Z]+) ([a-zA-Z0-9._~%!$&'()*+,;=:@/]+) RTSP/\\d\\.\\d.*", type: "regex", description: "RTSP request"},
+  
+  // Credential leakage patterns
+  {id: 800, text: "password=", type: "literal", description: "Password in URL parameter"},
+  {id: 801, text: "passwd=", type: "literal", description: "Password in URL parameter"},
+  {id: 802, text: ".*(?:password=|pwd=|passwd=|pass=)([^&\\s]+).*", type: "regex", description: "Password in various formats"}
+]
+
+// Sample traffic to check against patterns
+@traffic_samples = [
+  // HTTP requests
+  {id: 1, text: "GET /index.php HTTP/1.1\r\nHost: example.com\r\n\r\n"},
+  {id: 2, text: "POST /login.php HTTP/1.1\r\nHost: example.com\r\n\r\nusername=admin&password=admin123"},
+  
+  // SQL injection attempts
+  {id: 3, text: "GET /search.php?q=test' OR 1=1-- HTTP/1.1\r\nHost: example.com\r\n\r\n"},
+  {id: 4, text: "GET /products.php?id=1 UNION SELECT username,password FROM users HTTP/1.1"},
+  
+  // XSS attempts
+  {id: 5, text: "GET /comment.php?text=<script>alert('XSS')</script> HTTP/1.1"},
+  
+  // Directory traversal attempts
+  {id: 6, text: "GET /download.php?file=../../../etc/passwd HTTP/1.1"},
+  {id: 7, text: "GET /include.php?template=..\\..\\windows\\system32\\drivers\\etc\\hosts HTTP/1.1"},
+  
+  // Command injection attempts
+  {id: 8, text: "GET /ping.php?host=127.0.0.1;system('cat /etc/passwd') HTTP/1.1"},
+  
+  // Data leakage
+  {id: 9, text: "GET /checkout.php?cardnumber=4111111111111111&exp=12/24 HTTP/1.1"},
+  
+  // Email protocol
+  {id: 10, text: "MAIL FROM:<attacker@evil.com>\r\nRCPT TO:<victim@target.com>\r\n"}
+]
+
+// Function to classify patterns and build matcher
+@build_snort_matcher(patterns) =
+  // Classify patterns by type
+  let grouped_patterns = @group_patterns_by_type(patterns)
+  
+  // Build specialized matchers for each pattern type
+  // 1. Aho-Corasick automaton for literals
+  let literal_automaton = @build_ac_automaton(grouped_patterns.literals)
+  
+  // 2. NFA for regex patterns
+  let regex_nfas = @map(grouped_patterns.regexes, @pattern_to_nfa)
+  let combined_nfa = @combine_nfas(regex_nfas)
+  
+  // 3. Character class patterns
+  let class_vectors = @prepare_bit_vectors(grouped_patterns.char_classes)
+  
+  // 4. Prefix grouping
+  let prefix_groups = @group_by_prefix(grouped_patterns.prefixes)
+  
+  // Return matcher configuration
+  {
+    literals: literal_automaton,
+    regexes: combined_nfa,
+    char_classes: class_vectors,
+    prefixes: prefix_groups
+  }
+
+// Match a single packet/traffic sample against all patterns
+@match_traffic(matcher, traffic) =
+  // Match using each specialized algorithm
+  let literal_matches = @match_ac(matcher.literals, traffic.text)
+  let regex_matches = @match_combined_nfa(matcher.regexes, traffic.text, 0)
+  let class_matches = @bit_parallel_match(matcher.char_classes, traffic.text)
+  let prefix_matches = @match_prefix_groups(matcher.prefixes, traffic.text)
+  
+  // Combine all matches
+  let all_matches = @combine_match_results([
+    literal_matches,
+    regex_matches,
+    class_matches,
+    prefix_matches
+  ])
+  
+  // Return traffic ID with matches
+  {
+    traffic_id: traffic.id,
+    matches: all_matches
+  }
+
+// Match multiple traffic samples in parallel
+@match_multiple(matcher, traffic_samples) =
+  @match_multiple_iter(matcher, traffic_samples, 0, (len traffic_samples), [])
+
+// Iterator for matching multiple traffic samples
+@match_multiple_iter(matcher, samples, i, n, results) = ~(== i n) {
+  true: results  // All samples processed
+  false:
+    // Get current sample
+    let sample = (get samples i)
+    
+    // Match against all patterns
+    let match_result = @match_traffic(matcher, sample)
+    
+    // Add to results and continue
+    let new_results = (+ results [match_result])
+    @match_multiple_iter(matcher, samples, (+ i 1), n, new_results)
+}
+
+// Main entry point
+@main =
+  // 1. Build the matcher (preprocessing stage - done once)
+  let matcher = @build_snort_matcher(@snort_patterns)
+  
+  // 2. Match all traffic samples (would be the packet processing stage in IDS)
+  let results = @match_multiple(matcher, @traffic_samples)
+  
+  // Return detection results
+  results

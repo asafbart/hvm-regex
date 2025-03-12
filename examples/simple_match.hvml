@@ -1,0 +1,129 @@
+// Simple example of using the HVM regex engine
+
+// Import the optimized regex engine
+// (Assume that we're running from the project root with 'hvm run examples/simple_match.hvml')
+//#include "src/core/optimized_regex.hvml"
+
+// Since includes may not work as expected, copy relevant parts here for demo
+data Result {
+  #Match { pos len }
+  #NoMatch
+}
+
+data Pattern {
+  #Literal { str }  
+  #Char { c }
+  #Any
+  #Concat { a b }
+  #Alt { a b }
+  #Star { node }
+}
+
+// Simple implementations for demo
+@match_literal(str, text, pos) =
+  ! text_len = (len text)
+  ! str_len = (len str)
+  ~(> (+ pos str_len) text_len) {
+    1: #NoMatch
+    0:
+      ! substring = (substr text pos str_len)
+      ~(== substring str) {
+        1: #Match{pos str_len}
+        0: #NoMatch
+      }
+  }
+
+@match_char(c, text, pos) =
+  ~(>= pos (len text)) {
+    1: #NoMatch
+    0:
+      ! curr = (substr text pos 1)
+      ~(== curr c) {
+        1: #Match{pos 1}
+        0: #NoMatch
+      }
+  }
+
+@match_any(text, pos) =
+  ~(>= pos (len text)) {
+    1: #NoMatch
+    0: #Match{pos 1}
+  }
+
+@match_concat(a, b, text, pos) =
+  ! result_a = @match(a, text, pos)
+  ~result_a {
+    #Match{a_pos a_len}:
+      ! new_pos = (+ pos a_len)
+      ! result_b = @match(b, text, new_pos)
+      ~result_b {
+        #Match{b_pos b_len}: #Match{pos (+ a_len b_len)}
+        #NoMatch: #NoMatch
+      }
+    #NoMatch: #NoMatch
+  }
+
+@match_alt(a, b, text, pos) =
+  ! result_a = @match(a, text, pos)
+  ! result_b = @match(b, text, pos)
+  ~result_a {
+    #Match{a_pos a_len}: result_a
+    #NoMatch: 
+      ~result_b {
+        #Match{b_pos b_len}: result_b
+        #NoMatch: #NoMatch
+      }
+  }
+
+@match_star(node, text, pos) =
+  ! zero_match = #Match{pos 0}
+  ! result = @match(node, text, pos)
+  ~result {
+    #Match{r_pos r_len}:
+      ! new_pos = (+ pos r_len)
+      ! rest_result = @match_star(node, text, new_pos)
+      ~rest_result {
+        #Match{rest_pos rest_len}: #Match{pos (+ r_len rest_len)}
+        #NoMatch: #Match{pos r_len}
+      }
+    #NoMatch: zero_match
+  }
+
+@match(pattern, text, pos) = ~pattern {
+  #Literal{str}: @match_literal(str, text, pos)
+  #Char{c}: @match_char(c, text, pos)
+  #Any: @match_any(text, pos)
+  #Concat{a b}: @match_concat(a, b, text, pos)
+  #Alt{a b}: @match_alt(a, b, text, pos)
+  #Star{node}: @match_star(node, text, pos)
+}
+
+// Example main function
+@main =
+  // Create a simple regex pattern: a(b|c)*d
+  ! a = #Char{"a"}
+  ! b = #Char{"b"}
+  ! c = #Char{"c"}
+  ! bc_alt = #Alt{b c}
+  ! bc_star = #Star{bc_alt}
+  ! d = #Char{"d"}
+  ! a_bc_star = #Concat{a bc_star}
+  ! pattern = #Concat{a_bc_star d}
+  
+  // Test strings
+  ! text1 = "ad"        // Matches (0 repetitions of b|c)
+  ! text2 = "abcd"      // Matches (1 repetition of b, 1 of c)
+  ! text3 = "abbbcd"    // Matches (3 repetitions of b, 1 of c)
+  ! text4 = "xyz"       // Doesn't match
+  
+  // Run matches
+  ! result1 = @match(pattern, text1, 0)
+  ! result2 = @match(pattern, text2, 0)
+  ! result3 = @match(pattern, text3, 0)
+  ! result4 = @match(pattern, text4, 0)
+  
+  // Print results
+  ["Result for 'ad':", result1,
+   "Result for 'abcd':", result2,
+   "Result for 'abbbcd':", result3,
+   "Result for 'xyz':", result4]

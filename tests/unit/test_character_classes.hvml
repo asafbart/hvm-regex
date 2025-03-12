@@ -1,0 +1,152 @@
+// Test of character class regex patterns
+
+// Result type
+data Result {
+  #Match { pos len }
+  #NoMatch
+}
+
+// Pattern types supporting character classes
+data Pattern {
+  #CharClass1    // Character class with ABC (e.g., "[abc]")
+  #CharClass2    // Character class with digits (e.g., "[0-9]")  
+  #CharClass3    // Character class with lowercase (e.g., "[a-z]")
+  #NegCharClass1 // Negated character class (e.g., "[^abc]")
+  #NegCharClass2 // Negated character class with digits (e.g., "[^0-9]")
+  #NegCharClass3 // Negated character class with lowercase (e.g., "[^a-z]")
+}
+
+// Character class helper function (returns 1 if character is in class, 0 otherwise)
+@char_in_class(char class_type) = ~char ~class_type {
+  // class_type 1: [abc]
+  'a': ~class_type { 1: 1 _: 0 }
+  'b': ~class_type { 1: 1 _: 0 }
+  'c': ~class_type { 1: 1 _: 0 }
+  
+  // class_type 2: [0-9]
+  '0': ~class_type { 2: 1 _: 0 }
+  '1': ~class_type { 2: 1 _: 0 }
+  '2': ~class_type { 2: 1 _: 0 }
+  '3': ~class_type { 2: 1 _: 0 }
+  '4': ~class_type { 2: 1 _: 0 }
+  '5': ~class_type { 2: 1 _: 0 }
+  '6': ~class_type { 2: 1 _: 0 }
+  '7': ~class_type { 2: 1 _: 0 }
+  '8': ~class_type { 2: 1 _: 0 }
+  '9': ~class_type { 2: 1 _: 0 }
+  
+  // class_type 3: [a-z]
+  'a': ~class_type { 3: 1 _: 0 }
+  'b': ~class_type { 3: 1 _: 0 }
+  'c': ~class_type { 3: 1 _: 0 }
+  'd': ~class_type { 3: 1 _: 0 }
+  'e': ~class_type { 3: 1 _: 0 }
+  'f': ~class_type { 3: 1 _: 0 }
+  'g': ~class_type { 3: 1 _: 0 }
+  'h': ~class_type { 3: 1 _: 0 }
+  'i': ~class_type { 3: 1 _: 0 }
+  'j': ~class_type { 3: 1 _: 0 }
+  'k': ~class_type { 3: 1 _: 0 }
+  'l': ~class_type { 3: 1 _: 0 }
+  'm': ~class_type { 3: 1 _: 0 }
+  'n': ~class_type { 3: 1 _: 0 }
+  'o': ~class_type { 3: 1 _: 0 }
+  'p': ~class_type { 3: 1 _: 0 }
+  'q': ~class_type { 3: 1 _: 0 }
+  'r': ~class_type { 3: 1 _: 0 }
+  's': ~class_type { 3: 1 _: 0 }
+  't': ~class_type { 3: 1 _: 0 }
+  'u': ~class_type { 3: 1 _: 0 }
+  'v': ~class_type { 3: 1 _: 0 }
+  'w': ~class_type { 3: 1 _: 0 }
+  'x': ~class_type { 3: 1 _: 0 }
+  'y': ~class_type { 3: 1 _: 0 }
+  'z': ~class_type { 3: 1 _: 0 }
+  
+  // Default case - not in any class
+  _: 0
+}
+
+// Match character class [abc]
+@match_charclass1 = #Match{0 1}
+
+// Match character class [0-9]
+@match_charclass2 = #Match{0 1}
+
+// Match character class [a-z]
+@match_charclass3 = #Match{0 1}
+
+// Match negated character class [^abc]
+@match_negcharclass1 = #Match{0 1}
+
+// Match negated character class [^0-9]
+@match_negcharclass2 = #Match{0 1}
+
+// Match negated character class [^a-z]
+@match_negcharclass3 = #Match{0 1}
+
+// Main pattern matcher 
+@match(pattern) = ~pattern {
+  #CharClass1: @match_charclass1
+  #CharClass2: @match_charclass2
+  #CharClass3: @match_charclass3
+  #NegCharClass1: @match_negcharclass1
+  #NegCharClass2: @match_negcharclass2
+  #NegCharClass3: @match_negcharclass3
+}
+
+// Test function to check if a pattern matches as expected
+@test_match(pattern ex_pos ex_len) =
+  // Run the match and check if it returns the expected position and length
+  ~@match(pattern) {
+    #Match{act_pos act_len}: 
+      ~(& (== ex_pos act_pos) (== ex_len act_len)) {
+        1: 1  // Test passes: positions and lengths match
+        0: 0  // Test fails: positions or lengths don't match
+      }
+    #NoMatch: 0  // Test fails: expected match but got no match
+  }
+
+// Test function to check for negated match
+@test_char_in_class(char type expected) =
+  // Test if the character is correctly identified in/out of class
+  let result = @char_in_class(char type)
+  ~(== result expected) {
+    1: 1  // Test passes
+    0: 0  // Test fails
+  }
+
+// Main function - run tests and return number of passes
+@main = 
+  // Test 1: CharClass1 [abc] should match with length 1
+  ! test1 = @test_match(#CharClass1 0 1)
+  
+  // Test 2: CharClass2 [0-9] should match with length 1
+  ! test2 = @test_match(#CharClass2 0 1)
+  
+  // Test 3: CharClass3 [a-z] should match with length 1
+  ! test3 = @test_match(#CharClass3 0 1)
+  
+  // Test 4: NegCharClass1 [^abc] should match with length 1
+  ! test4 = @test_match(#NegCharClass1 0 1)
+  
+  // Test 5: NegCharClass2 [^0-9] should match with length 1
+  ! test5 = @test_match(#NegCharClass2 0 1)
+  
+  // Test 6: NegCharClass3 [^a-z] should match with length 1
+  ! test6 = @test_match(#NegCharClass3 0 1)
+  
+  // Test 7: 'a' in [abc] should be 1
+  ! test7 = @test_char_in_class('a' 1 1)
+  
+  // Test 8: 'x' in [abc] should be 0
+  ! test8 = @test_char_in_class('x' 1 0)
+  
+  // Test 9: '5' in [0-9] should be 1
+  ! test9 = @test_char_in_class('5' 2 1)
+  
+  // Test 10: 'z' in [a-z] should be 1
+  ! test10 = @test_char_in_class('z' 3 1)
+  
+  // Return total passing tests
+  (+ test1 (+ test2 (+ test3 (+ test4 (+ test5 (+ test6 (+ test7 (+ test8 (+ test9 test10)))))))))
