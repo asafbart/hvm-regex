@@ -199,6 +199,61 @@ When implementing regex functionality in HVM3:
 
 4. **Check Syntax**: Ensure your syntax follows HVM3's strict requirements.
 
+## Running Tests with HVM3
+
+To run tests for your HVM3 code, you can use the following commands:
+
+### Basic Test Execution
+
+To run a single test file:
+
+```bash
+cabal run hvml -- run tests/unit/your_test_file.hvml
+```
+
+This will execute the file and display the result. A successful test typically outputs a single value, which is the return value of the `main` function.
+
+### Testing Tips
+
+1. **Test Incrementally**: Start with the simplest possible test case and gradually add complexity.
+
+2. **Isolated Testing**: When facing errors, create minimal test files that isolate the specific feature or behavior you're testing.
+
+3. **Error Diagnosis**: If you encounter parse errors, HVM3 will tell you the line number and a brief description of the issue.
+
+4. **Unit Testing**: Create small functions that test individual components:
+
+   ```
+   @test_feature =
+     ! input = ...
+     ! expected = ...
+     ! result = @feature_under_test(input)
+     (== result expected)  // Returns 1 if test passes, 0 if it fails
+   ```
+
+5. **Combining Test Results**: You can combine multiple test results using the logical AND operator:
+
+   ```
+   @main = ~ (#Pol{123}) {
+     #Var{idx}: *
+     #Pol{bod}:
+       ! test1 = @test_feature1
+       ! test2 = @test_feature2
+       (& test1 test2)  // Returns 1 only if both tests pass
+     ...
+   }
+   ```
+
+### Debugging Failed Tests
+
+When a test fails:
+
+1. Check for syntax errors in your test code
+2. Verify that your `main` function follows the required format
+3. Look for variable reuse issues
+4. Ensure pattern matching is exhaustive
+5. Break complex operations into simpler steps with intermediate variables
+
 ## Conclusion
 
 HVM3 is powerful but has strict requirements. By following these guidelines, you can avoid common pitfalls and build reliable, efficient code. Always start simple, test incrementally, and follow the exact syntax patterns that are known to work with your HVM3 installation.
