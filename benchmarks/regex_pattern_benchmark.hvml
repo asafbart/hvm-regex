@@ -1,0 +1,147 @@
+// Regex pattern benchmark for HVM3
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// Pattern types for a simplified regex engine
+data Pattern { 
+  #Lit{val}             // Literal character
+  #Cat{a b}             // Concatenation
+  #Alt{a b}             // Alternation
+  #Rep{p}               // Repetition (*)
+}
+
+// Match result
+data Result { #Match #NoMatch }
+
+// Match a literal
+@match_lit(val) = #Match
+
+// Match concatenation 
+@match_cat(ra rb) = ~ ra {
+  #Match: rb
+  #NoMatch: #NoMatch
+}
+
+// Match alternation
+@match_alt(ra rb) = ~ ra {
+  #Match: #Match
+  #NoMatch: rb
+}
+
+// Match repetition - simplified (* operator)
+@match_rep(p) = #Match  // Always matches
+
+// Main match function
+@match(pattern) = ~ pattern {
+  #Lit{val}: @match_lit(val)
+  #Cat{a b}:
+    ! ra = @match(a)
+    ! rb = @match(b)
+    @match_cat(ra rb)
+  #Alt{a b}:
+    ! ra = @match(a)
+    ! rb = @match(b)
+    @match_alt(ra rb)
+  #Rep{p}: @match_rep(p)
+}
+
+// Benchmark different regex patterns
+
+// Simple literal: 'a'
+@benchmark_literal =
+  ! pattern = #Lit{97}  // ASCII 'a'
+  ! result = @match(pattern)
+  ~ result {
+    #Match: 1
+    #NoMatch: 0
+  }
+
+// Concatenation: 'ab'
+@benchmark_concatenation =
+  ! a = #Lit{97}  // ASCII 'a'
+  ! b = #Lit{98}  // ASCII 'b'
+  ! pattern = #Cat{a b}
+  ! result = @match(pattern)
+  ~ result {
+    #Match: 1
+    #NoMatch: 0
+  }
+
+// Alternation: 'a|b'
+@benchmark_alternation =
+  ! a = #Lit{97}  // ASCII 'a'
+  ! b = #Lit{98}  // ASCII 'b'
+  ! pattern = #Alt{a b}
+  ! result = @match(pattern)
+  ~ result {
+    #Match: 1
+    #NoMatch: 0
+  }
+
+// Complex pattern: '(a|b)*c'
+@benchmark_complex =
+  ! a = #Lit{97}  // ASCII 'a'
+  ! b = #Lit{98}  // ASCII 'b'
+  ! c = #Lit{99}  // ASCII 'c'
+  ! a_or_b = #Alt{a b}
+  ! star = #Rep{a_or_b}
+  ! pattern = #Cat{star c}
+  ! result = @match(pattern)
+  ~ result {
+    #Match: 1
+    #NoMatch: 0
+  }
+
+// Run all benchmarks multiple times to simulate a real benchmark
+@run_all_benchmarks =
+  // Run each benchmark 5 times
+  // Literal benchmarks
+  ! l1 = @benchmark_literal
+  ! l2 = @benchmark_literal
+  ! l3 = @benchmark_literal
+  ! l4 = @benchmark_literal
+  ! l5 = @benchmark_literal
+  ! lit_sum = (+ (+ (+ (+ l1 l2) l3) l4) l5)
+  
+  // Concatenation benchmarks
+  ! c1 = @benchmark_concatenation
+  ! c2 = @benchmark_concatenation
+  ! c3 = @benchmark_concatenation
+  ! c4 = @benchmark_concatenation
+  ! c5 = @benchmark_concatenation
+  ! cat_sum = (+ (+ (+ (+ c1 c2) c3) c4) c5)
+  
+  // Alternation benchmarks
+  ! a1 = @benchmark_alternation
+  ! a2 = @benchmark_alternation
+  ! a3 = @benchmark_alternation
+  ! a4 = @benchmark_alternation
+  ! a5 = @benchmark_alternation
+  ! alt_sum = (+ (+ (+ (+ a1 a2) a3) a4) a5)
+  
+  // Complex benchmarks
+  ! x1 = @benchmark_complex
+  ! x2 = @benchmark_complex
+  ! x3 = @benchmark_complex
+  ! x4 = @benchmark_complex
+  ! x5 = @benchmark_complex
+  ! complex_sum = (+ (+ (+ (+ x1 x2) x3) x4) x5)
+  
+  // Combine all results
+  ! sum1 = (+ lit_sum cat_sum)
+  ! sum2 = (+ alt_sum complex_sum)
+  ! total = (+ sum1 sum2)
+  
+  // Return the result
+  total
+
+// Main function
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}:
+    @run_all_benchmarks
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}

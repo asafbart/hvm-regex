@@ -1,0 +1,47 @@
+// HVM3 benchmark with zero variable reuse
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// Simple pattern type
+data Pattern { #Lit{val} }
+
+// Simple matcher
+@match(p) = ~ p {
+  #Lit{val}: val
+}
+
+// Fixed iterations - no loops to avoid variable reuse
+@benchmark_5_times =
+  ! p1 = #Lit{10}
+  ! r1 = @match(p1)
+  
+  ! p2 = #Lit{20}
+  ! r2 = @match(p2)
+  
+  ! p3 = #Lit{30}
+  ! r3 = @match(p3)
+  
+  ! p4 = #Lit{40}
+  ! r4 = @match(p4)
+  
+  ! p5 = #Lit{50}
+  ! r5 = @match(p5)
+  
+  ! sum_1_2 = (+ r1 r2)
+  ! sum_3_4 = (+ r3 r4)
+  ! sum_1234 = (+ sum_1_2 sum_3_4)
+  ! total = (+ sum_1234 r5)
+  
+  total
+
+// Main function
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}:
+    // Run benchmark
+    @benchmark_5_times
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}
