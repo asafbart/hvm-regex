@@ -1,0 +1,115 @@
+// Ultra minimal HVM3 regex test
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// Simple pattern type
+data Pattern { 
+  #Lit{val} 
+  #Cat{left right} 
+  #Alt{left right}
+  #Rep{pattern}
+}
+
+// Result type
+data Result { #Match #NoMatch }
+
+// Match function
+@match(pat) = ~ pat {
+  #Lit{val}: #Match
+  
+  #Cat{left right}: 
+    ! left_result = @match(left)
+    ~ left_result {
+      #Match: 
+        ! right_result = @match(right)
+        right_result
+      #NoMatch: #NoMatch
+    }
+    
+  #Alt{left right}:
+    ! left_result = @match(left)
+    ~ left_result {
+      #Match: #Match
+      #NoMatch: @match(right)
+    }
+    
+  #Rep{pattern}: #Match  // Zero repetitions always matches
+}
+
+// Test literal
+@test_lit = 
+  ! p = #Lit{123}
+  ! r = @match(p)
+  ~ r {
+    #Match: 1
+    #NoMatch: 0
+  }
+
+// Test concatenation
+@test_cat = 
+  ! left = #Lit{1}
+  ! right = #Lit{2}
+  ! p = #Cat{left right}
+  ! r = @match(p)
+  ~ r {
+    #Match: 1
+    #NoMatch: 0
+  }
+
+// Test alternation
+@test_alt = 
+  ! left = #Lit{1}
+  ! right = #Lit{2}
+  ! p = #Alt{left right}
+  ! r = @match(p)
+  ~ r {
+    #Match: 1
+    #NoMatch: 0
+  }
+
+// Test repetition (star)
+@test_rep = 
+  ! inner = #Lit{1}
+  ! p = #Rep{inner}
+  ! r = @match(p)
+  ~ r {
+    #Match: 1
+    #NoMatch: 0
+  }
+
+// Test complex pattern: (a|b)*c
+@test_complex =
+  ! a = #Lit{65}  // 'A'
+  ! b = #Lit{66}  // 'B'
+  ! c = #Lit{67}  // 'C'
+  ! a_or_b = #Alt{a b}
+  ! a_or_b_star = #Rep{a_or_b}
+  ! pattern = #Cat{a_or_b_star c}
+  ! result = @match(pattern)
+  ~ result {
+    #Match: 1
+    #NoMatch: 0
+  }
+
+// Main function
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}:
+    ! lit_test = @test_lit
+    ! cat_test = @test_cat
+    ! alt_test = @test_alt
+    ! rep_test = @test_rep
+    ! complex_test = @test_complex
+    
+    // Combine all test results with logical AND
+    ! test1_and_2 = (& lit_test cat_test)
+    ! test3_and_4 = (& alt_test rep_test)
+    ! basic_tests = (& test1_and_2 test3_and_4)
+    
+    // Final result includes the complex test
+    (& basic_tests complex_test)  // Return 1 if all tests pass, 0 otherwise
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}

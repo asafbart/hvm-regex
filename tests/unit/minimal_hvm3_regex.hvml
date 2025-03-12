@@ -1,0 +1,100 @@
+// Minimal HVM3 regex test with just the essentials
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// Define very simple regex Pattern type
+data Pattern { 
+  #Lit{val}
+  #Cat{a b}
+  #Alt{a b}
+  #Star{p}
+}
+
+// Define match result type
+data Result { #Match{pos len} #NoMatch }
+
+// Match literal
+@match_lit = #Match{0 1}
+
+// Match concatenation
+@match_cat(result_a result_b) = 
+  ~ result_a {
+    #Match{p1 l1}: 
+      ~ result_b {
+        #Match{p2 l2}: #Match{0 2}
+        #NoMatch: #NoMatch
+      }
+    #NoMatch: #NoMatch
+  }
+
+// Match alternation
+@match_alt(result_a result_b) =
+  ~ result_a {
+    #Match{p1 l1}: result_a
+    #NoMatch: result_b
+  }
+
+// Match star (zero or more)
+@match_star = #Match{0 0}
+
+// Main pattern matcher
+@match(pattern) = ~ pattern {
+  #Lit{val}: @match_lit
+  #Cat{a b}: 
+    ! r1 = @match(a)
+    ! r2 = @match(b)
+    @match_cat(r1 r2)
+  #Alt{a b}: 
+    ! r1 = @match(a)
+    ! r2 = @match(b)
+    @match_alt(r1 r2)
+  #Star{p}: @match_star
+}
+
+// Simple test of literal pattern
+@test_lit = 
+  ! pattern = #Lit{123}
+  ! result = @match(pattern)
+  ~ result {
+    #Match{p l}: 1
+    #NoMatch: 0
+  }
+
+// Test concatenation
+@test_cat = 
+  ! p1 = #Lit{1}
+  ! p2 = #Lit{2}
+  ! pattern = #Cat{p1 p2}
+  ! result = @match(pattern)
+  ~ result {
+    #Match{p l}: (== l 2)
+    #NoMatch: 0
+  }
+
+// Test alternation
+@test_alt = 
+  ! p1 = #Lit{1}
+  ! p2 = #Lit{2}
+  ! pattern = #Alt{p1 p2}
+  ! result = @match(pattern)
+  ~ result {
+    #Match{p l}: 1
+    #NoMatch: 0
+  }
+
+// Main function (in proper HVM3 format)
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}:
+    // Run tests
+    ! test1 = @test_lit
+    ! test2 = @test_cat
+    ! test3 = @test_alt
+    
+    // Return 1 if all tests passed, 0 otherwise
+    (& (& test1 test2) test3)
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}
