@@ -1,0 +1,37 @@
+// Test to demonstrate HVM3's variable substring restriction
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// This test passes - using completely different variable names
+@test_ok = 
+  ! alpha = 1
+  ! beta = 2
+  ! sum = (+ alpha beta)
+  sum
+
+// This test would fail - using a variable that contains another variable name as a substring
+// To test, try the pattern where "pos" is defined first, then "pos_init" would cause an error
+@disabled_test_substring_fail = 
+  ! pos = 1
+  ! placeholder = 2  // Replace with "pos_init" to see the error
+  ! sum = (+ pos placeholder)
+  sum
+
+// Workaround: Use completely unrelated variable names without shared substrings
+@test_workaround = 
+  ! x1 = 1
+  ! y2 = 2  // Completely different prefix than x1
+  ! z3 = (+ x1 y2)
+  z3
+
+// Main function
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}:
+    ! result = @test_ok
+    result
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}

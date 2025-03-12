@@ -46,6 +46,24 @@ HVM3 has extremely strict syntax requirements that differ from other functional 
    }
    ```
 
+3. **Substring Variable Detection**: HVM3 treats a variable as "reused" if another variable contains it as a substring. This is stricter than most languages.
+
+   ```
+   // WRONG - 'pos_init' contains 'pos' as a substring
+   @match(pattern) =
+     ! pos = 0
+     ! pos_init = 1  // Error: variable 'pos' used more than once
+     (+ pos pos_init)
+   
+   // CORRECT - completely different variable names
+   @match(pattern) =
+     ! p = 0
+     ! position = 1  // No common substring with 'p'
+     (+ p position)
+   ```
+   
+   This behavior makes variable naming challenging, as common prefixes or suffixes can trigger the error. The best approach is to use completely unrelated variable names in different contexts, or use short arbitrary names like `v1`, `v2`, etc.
+
 ### Pattern Matching
 
 1. **Nested Patterns**: HVM3 requires careful pattern structure. Deeply nested patterns can cause syntax errors.

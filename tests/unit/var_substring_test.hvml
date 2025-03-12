@@ -1,0 +1,19 @@
+// Test to verify HVM3's variable substring detection
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// The test below should fail if HVM3 detects substrings
+@test_substring = 
+  ! abc = 1
+  ! abc_xyz = 2  // Should trigger: variable "abc" used more than once
+  (+ abc abc_xyz)
+
+// Main function (will never run due to parse error if substring detection is active)
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}: 0
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}

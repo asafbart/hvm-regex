@@ -1,0 +1,19 @@
+// Test to verify HVM3's variable reuse detection
+data Term { #Var{idx} #Pol{bod} #All{inp bod} #Lam{bod} #App{fun arg} #U32 #Num{val} }
+
+// Test with explicit variable reuse - will definitely fail
+@test_explicit_reuse = 
+  ! x = 1
+  ! x = 2  // Intentional error: variable "x" used more than once
+  (+ x x)
+
+// Main function (will never run due to parse error)
+@main = ~ (#Pol{123}) {
+  #Var{idx}: *
+  #Pol{bod}: 0
+  #All{inp bod}: *
+  #Lam{bod}: *
+  #App{fun arg}: *
+  #U32: *
+  #Num{val}: *
+}
